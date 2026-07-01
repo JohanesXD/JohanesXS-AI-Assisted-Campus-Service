@@ -414,9 +414,13 @@ Response:
 - Desain API tidak membuat fitur di luar scope.
 
 ## Human Review
-Manusia perlu memeriksa:
-1. Apakah endpoint target terlalu besar untuk versi awal.
-2. Apakah endpoint MVP sudah cukup untuk mulai implementasi.
-3. Apakah aturan akses setiap role sudah sesuai.
-4. Apakah format CSV sudah cukup untuk laporan ringkas.
-5. Apakah API existing boleh diperluas bertahap daripada diganti sekaligus.
+Human review tahap API design sudah dilakukan oleh pengguna pada 1 Juli 2026.
+
+## Keputusan Human Review
+1. Endpoint target memang cukup besar untuk versi awal, tetapi semua endpoint dibutuhkan.
+2. Endpoint MVP sudah cukup untuk mulai implementasi.
+3. Aturan akses setiap role sudah sesuai.
+4. Format CSV sudah cukup untuk laporan ringkas karena versi awal tidak membutuhkan format yang terlalu kompleks.
+5. API existing boleh diperluas bertahap daripada diganti sekaligus.
+
+Tidak ada pertanyaan API design yang masih terbuka pada tahap ini.

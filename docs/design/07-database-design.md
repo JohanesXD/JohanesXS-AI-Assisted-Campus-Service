@@ -23,7 +23,7 @@ Migration tersebut berisi satu tabel:
 ## Catatan Desain
 Desain ini adalah rancangan target berdasarkan requirement dan arsitektur. Implementasi dapat dilakukan bertahap melalui migration baru agar tidak merusak database awal.
 
-ASUMSI: Autentikasi akun kampus pada versi awal memakai tabel `users` dan role internal sampai integrasi akun kampus nyata ditentukan.
+ASUMSI: Autentikasi akun kampus pada versi awal memakai tabel `users` dan role internal sampai integrasi akun kampus nyata ditentukan. `users.id` tetap digunakan sebagai ID internal sistem untuk relasi antar tabel, sedangkan `campus_email` wajib dan unique sebagai identitas akun kampus.
 
 ASUMSI: Foto kerusakan dan foto hasil pekerjaan disimpan sebagai URL opsional, bukan file binary.
 
@@ -89,10 +89,9 @@ ASUMSI: Semua timestamp disimpan sebagai `TEXT` ISO-8601 agar sederhana digunaka
 ### `users`
 | Kolom | Tipe | Key | Wajib | Keterangan |
 | --- | --- | --- | --- | --- |
-| `id` | TEXT | PK | Ya | ID pengguna. |
-| `campus_account_id` | TEXT | UNIQUE | Ya | Identitas akun kampus atau simulasi akun kampus. |
+| `id` | TEXT | PK | Ya | ID internal sistem untuk relasi database. |
+| `campus_email` | TEXT | UNIQUE | Ya | Email kampus pengguna sebagai identitas akun kampus. |
 | `name` | TEXT |  | Ya | Nama pengguna. |
-| `email` | TEXT | UNIQUE | Ya | Email kampus atau email pengguna. |
 | `role` | TEXT |  | Ya | `REPORTER`, `ADMIN`, `TECHNICIAN`, atau `FACILITY_MANAGER`. |
 | `is_active` | INTEGER |  | Ya | `1` aktif, `0` tidak aktif. |
 | `created_at` | TEXT |  | Ya | Waktu dibuat. |
@@ -287,9 +286,13 @@ Index yang disarankan:
 - Desain mendukung export CSV tanpa tabel tambahan.
 
 ## Human Review
-Manusia perlu memeriksa:
-1. Apakah tabel target sudah cukup untuk kebutuhan proyek.
-2. Apakah migration bertahap dapat diterima.
-3. Apakah penggunaan URL untuk foto sudah cukup di sisi database.
-4. Apakah status laporan dan role pengguna sudah sesuai.
-5. Apakah desain ini terlalu besar untuk versi awal dan perlu dipilah lagi untuk implementasi MVP.
+Human review tahap database design sudah dilakukan oleh pengguna pada 1 Juli 2026.
+
+## Keputusan Human Review
+1. `users.id` tetap digunakan sebagai ID internal sistem, sedangkan `campus_email` wajib dan unique sebagai identitas akun kampus.
+2. Migration bertahap diterima.
+3. Penggunaan URL untuk foto sudah cukup di sisi database.
+4. Status laporan dan role pengguna sudah sesuai.
+5. Desain database dinilai sesuai dan tidak terlalu besar untuk versi awal. Jika nanti implementasi terasa terlalu besar, scope MVP akan didiskusikan kembali.
+
+Tidak ada pertanyaan database design yang masih terbuka pada tahap ini.
