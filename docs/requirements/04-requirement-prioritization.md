@@ -66,8 +66,8 @@ ASUMSI: Konflik kebutuhan dianalisis dari requirement formal, aturan bisnis, dan
 | FR-037 | Should | Riwayat dan status baca notifikasi memperjelas komunikasi, tetapi notifikasi dasar lebih prioritas. |
 | FR-038 | Should | Edit data laporan oleh administrator membantu validasi sebelum penugasan. |
 | FR-039 | Should | Penggabungan laporan duplikat mengurangi pekerjaan berulang. |
-| FR-040 | Should | Penggantian teknisi membantu operasional saat tugas berjalan, dengan kontrol persetujuan teknisi. |
-| FR-041 | Should | Foto hasil pekerjaan dan estimasi waktu memperkaya bukti progress. |
+| FR-040 | Should | Penggantian teknisi membantu operasional saat tugas berjalan, dengan kontrol persetujuan teknisi lama dan teknisi baru. |
+| FR-041 | Should | URL foto hasil pekerjaan dan estimasi waktu memperkaya bukti progress tanpa menambah kebutuhan storage file. |
 | FR-042 | Should | Unduh laporan ringkas berguna untuk pelaporan manajemen. |
 | FR-043 | Should | Catatan tindak lanjut Manajer Fasilitas penting untuk operasional lanjutan setelah laporan ringkas ditinjau. |
 
@@ -142,7 +142,7 @@ ASUMSI: Konflik kebutuhan dianalisis dari requirement formal, aturan bisnis, dan
 | CON-005 | FR-006, FR-030 | Pelapor harus memilih ruangan dari daftar, tetapi pembaruan daftar ruangan diprioritaskan rendah. | Pastikan versi awal memiliki seed data daftar ruangan. Pengelolaan ruangan oleh Manajer Fasilitas dapat ditunda bila daftar awal sudah cukup. |
 | CON-006 | FR-031, FR-032, FR-033 | Pelapor dapat mengubah laporan, tetapi perubahan dapat membuat laporan tidak valid. | Wajibkan alasan perubahan dan kembalikan laporan ke pemeriksaan administrator sebelum proses lanjut. Jika tidak valid, administrator dapat menutup laporan. |
 | CON-007 | FR-018, FR-020, FR-036 | Sistem dapat menutup otomatis setelah 45 menit, tetapi pelapor dapat menolak hasil pekerjaan dengan alasan. | Selama masih dalam jendela konfirmasi, penolakan pelapor menghentikan penutupan otomatis dan mengirim laporan ke keputusan administrator. |
-| CON-008 | FR-040 | Administrator dapat mengganti teknisi, tetapi penggantian harus disetujui teknisi. | Gunakan status `menunggu persetujuan penggantian teknisi`; penggantian baru efektif setelah persetujuan tersimpan. |
+| CON-008 | FR-040 | Administrator dapat mengganti teknisi, tetapi penggantian harus disetujui teknisi lama dan teknisi baru. | Gunakan status `menunggu persetujuan penggantian teknisi`; penggantian baru efektif setelah persetujuan kedua teknisi tersimpan. |
 | CON-009 | FR-038, FR-039 | Administrator dapat mengedit data laporan dan menggabungkan duplikat, sehingga riwayat laporan bisa membingungkan. | Simpan riwayat edit, alasan edit, dan referensi laporan utama saat duplikat digabungkan. |
 
 ## Requirement yang Sudah Diklarifikasi

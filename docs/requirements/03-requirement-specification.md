@@ -55,8 +55,8 @@ Sistem digunakan oleh mahasiswa dan dosen untuk melaporkan masalah fasilitas kam
 | FR-037 | Sistem harus menyediakan riwayat notifikasi dan status notifikasi sudah dibaca. | Klarifikasi pengguna 30 Juni 2026 |
 | FR-038 | Sistem harus mengizinkan administrator mengedit kategori, lokasi, atau deskripsi laporan sebelum menugaskan teknisi dengan menyertakan alasan. | Klarifikasi pengguna 30 Juni 2026 |
 | FR-039 | Sistem harus mengizinkan administrator menggabungkan laporan duplikat. | Klarifikasi pengguna 30 Juni 2026 |
-| FR-040 | Sistem harus mengizinkan administrator mengganti teknisi setelah laporan berjalan dengan persetujuan teknisi. | Klarifikasi pengguna 30 Juni 2026 |
-| FR-041 | Sistem harus mengizinkan teknisi mengunggah foto hasil pekerjaan atau memperkirakan waktu penyelesaian dengan menyertakan penjelasan. | Klarifikasi pengguna 30 Juni 2026 |
+| FR-040 | Sistem harus mengizinkan administrator mengganti teknisi setelah laporan berjalan dengan persetujuan teknisi lama dan teknisi baru. | Klarifikasi pengguna 30 Juni 2026, Human review 1 Juli 2026 |
+| FR-041 | Sistem harus mengizinkan teknisi menyertakan URL foto hasil pekerjaan atau memperkirakan waktu penyelesaian dengan menyertakan penjelasan. | Klarifikasi pengguna 30 Juni 2026, Human review 1 Juli 2026 |
 | FR-042 | Sistem harus mengizinkan laporan ringkas diunduh. | Klarifikasi pengguna 30 Juni 2026 |
 | FR-043 | Sistem harus mengizinkan Manajer Fasilitas memberi catatan tindak lanjut dengan menyertakan alasan. | Klarifikasi pengguna 30 Juni 2026 |
 
@@ -220,15 +220,16 @@ Sistem digunakan oleh mahasiswa dan dosen untuk melaporkan masalah fasilitas kam
 
 ### FR-040 Penggantian Teknisi
 1. Administrator dapat mengajukan penggantian teknisi setelah laporan berjalan.
-2. Teknisi harus memberikan persetujuan sebelum penggantian teknisi dilakukan.
-3. Jika teknisi menyetujui, sistem memperbarui teknisi yang menangani laporan.
-4. Jika teknisi tidak menyetujui, penggantian teknisi tidak dilakukan.
+2. Teknisi lama harus memberikan persetujuan sebelum penggantian teknisi dilakukan.
+3. Teknisi baru harus memberikan persetujuan sebelum penggantian teknisi dilakukan.
+4. Jika teknisi lama dan teknisi baru menyetujui, sistem memperbarui teknisi yang menangani laporan.
+5. Jika salah satu teknisi tidak menyetujui, penggantian teknisi tidak dilakukan.
 
-### FR-041 Foto Hasil Pekerjaan dan Estimasi Teknisi
-1. Teknisi dapat mengunggah foto hasil pekerjaan.
+### FR-041 URL Foto Hasil Pekerjaan dan Estimasi Teknisi
+1. Teknisi dapat menyertakan URL foto hasil pekerjaan.
 2. Teknisi dapat mengisi perkiraan waktu penyelesaian.
-3. Sistem meminta penjelasan saat teknisi mengunggah foto hasil pekerjaan atau mengisi perkiraan waktu penyelesaian.
-4. Sistem menyimpan foto, perkiraan waktu, dan penjelasan pada laporan.
+3. Sistem meminta penjelasan saat teknisi menyertakan URL foto hasil pekerjaan atau mengisi perkiraan waktu penyelesaian.
+4. Sistem menyimpan URL foto, perkiraan waktu, dan penjelasan pada laporan.
 
 ### FR-042 Unduh Laporan Ringkas
 1. Manajer Fasilitas dapat mengunduh laporan ringkas.
@@ -256,6 +257,7 @@ Bagian yang sebelumnya belum dispesifikasikan pada `03-requirement-specification
 | REQ-DRAFT-021 sampai REQ-DRAFT-024, REQ-DRAFT-032, REQ-DRAFT-033 | FR-024 sampai FR-029, US-012, US-013 |
 | REQ-DRAFT-026 | FR-030, US-014 |
 | Klarifikasi pengguna 30 Juni 2026 | FR-031 sampai FR-043, US-015 sampai US-020 |
+| Human review 1 Juli 2026 | FR-040, FR-041 |
 | Referensi tugas proyek Software Engineering | NFR-006 |
 
 ## ASUMSI
