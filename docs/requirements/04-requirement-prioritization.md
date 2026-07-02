@@ -19,9 +19,9 @@ ASUMSI: Konflik kebutuhan dianalisis dari requirement formal, aturan bisnis, dan
 | Prioritas | Jumlah Requirement Formal | Makna |
 | --- | ---: | --- |
 | Must | 30 | Wajib ada agar alur inti pelaporan, pemeriksaan, penugasan, progress, konfirmasi, penutupan, dan validasi perubahan laporan dapat berjalan. |
-| Should | 17 | Penting untuk operasional yang lebih lengkap, tetapi tidak menghentikan alur inti bila ditunda. |
+| Should | 16 | Penting untuk operasional yang lebih lengkap, tetapi tidak menghentikan alur inti bila ditunda. |
 | Could | 2 | Bermanfaat untuk pelaporan dan pengelolaan, tetapi dapat menjadi peningkatan setelah versi awal. |
-| Won't | 0 | Tidak ada requirement formal yang dikeluarkan dari scope pada tahap ini. |
+| Won't | 1 | Requirement formal yang dikeluarkan dari scope pada versi awal (fitur foto). |
 
 ## Prioritas Functional Requirement
 
@@ -30,7 +30,7 @@ ASUMSI: Konflik kebutuhan dianalisis dari requirement formal, aturan bisnis, dan
 | FR-001 | Must | Login akun kampus adalah dasar kontrol akses pelapor. |
 | FR-002 | Must | Pembuatan laporan adalah fungsi inti sistem. |
 | FR-003 | Must | Data laporan wajib diperlukan untuk memproses masalah fasilitas. |
-| FR-004 | Should | Bukti foto membantu pemeriksaan, tetapi bersifat opsional. |
+| FR-004 | Won't | (Dihapus) Fitur menyertakan bukti atau foto ditiadakan. |
 | FR-005 | Must | Kategori masalah diperlukan untuk klasifikasi dan dashboard. |
 | FR-006 | Must | Lokasi ruangan diperlukan agar teknisi mengetahui tempat masalah. |
 | FR-007 | Must | Pemeriksaan laporan adalah langkah awal proses administrator. |
@@ -67,7 +67,7 @@ ASUMSI: Konflik kebutuhan dianalisis dari requirement formal, aturan bisnis, dan
 | FR-038 | Should | Edit data laporan oleh administrator membantu validasi sebelum penugasan. |
 | FR-039 | Should | Penggabungan laporan duplikat mengurangi pekerjaan berulang. |
 | FR-040 | Should | Penggantian teknisi membantu operasional saat tugas berjalan, dengan kontrol persetujuan teknisi lama dan teknisi baru. |
-| FR-041 | Should | URL foto hasil pekerjaan dan estimasi waktu memperkaya bukti progress tanpa menambah kebutuhan storage file. |
+| FR-041 | Should | Estimasi waktu memperkaya bukti progress. |
 | FR-042 | Should | Unduh laporan ringkas berguna untuk pelaporan manajemen. |
 | FR-043 | Should | Catatan tindak lanjut Manajer Fasilitas penting untuk operasional lanjutan setelah laporan ringkas ditinjau. |
 
@@ -87,7 +87,7 @@ ASUMSI: Konflik kebutuhan dianalisis dari requirement formal, aturan bisnis, dan
 | ID | Prioritas | Requirement Terkait | Alasan Singkat |
 | --- | --- | --- | --- |
 | US-001 | Must | FR-001, NFR-001 | Login diperlukan sebelum pelaporan dan pemantauan. |
-| US-002 | Must | FR-002, FR-003, FR-004, FR-005, FR-006 | Pelaporan adalah nilai utama untuk mahasiswa dan dosen. |
+| US-002 | Must | FR-002, FR-003, FR-005, FR-006 | Pelaporan adalah nilai utama untuk mahasiswa dan dosen. |
 | US-003 | Must | FR-007, FR-008, FR-009 | Administrator harus dapat memvalidasi laporan. |
 | US-004 | Must | FR-010 | Penugasan menghubungkan laporan dengan pekerjaan teknisi. |
 | US-005 | Must | FR-011 | Teknisi perlu melihat tugas yang diberikan. |
@@ -103,7 +103,7 @@ ASUMSI: Konflik kebutuhan dianalisis dari requirement formal, aturan bisnis, dan
 | US-015 | Should | FR-031, FR-032, FR-033, FR-034 | Perubahan dan pembatalan laporan membantu koreksi laporan dengan kontrol administrator. |
 | US-016 | Must | FR-036 | Penolakan hasil pekerjaan mencegah masalah yang belum selesai tertutup begitu saja. |
 | US-017 | Should | FR-038, FR-039, FR-040 | Pengelolaan laporan oleh administrator membantu akurasi operasional. |
-| US-018 | Should | FR-041 | Bukti hasil pekerjaan dan estimasi membuat progress teknisi lebih jelas. |
+| US-018 | Should | FR-041 | Estimasi membuat progress teknisi lebih jelas. |
 | US-019 | Should | FR-037 | Riwayat notifikasi membantu pengguna melacak informasi sistem. |
 | US-020 | Should | FR-042, FR-043 | Unduhan dan catatan tindak lanjut membantu pemanfaatan laporan oleh Manajer Fasilitas. |
 
@@ -127,7 +127,7 @@ ASUMSI: Konflik kebutuhan dianalisis dari requirement formal, aturan bisnis, dan
 | FR-037 | FR-022, FR-023 | Riwayat notifikasi membutuhkan notifikasi dasar yang sudah dikirim sistem. |
 | FR-038, FR-039 | FR-007, FR-008 | Edit dan penggabungan laporan dilakukan dalam proses pemeriksaan administrator. |
 | FR-040 | FR-010, FR-011 | Penggantian teknisi hanya berlaku setelah laporan memiliki teknisi yang berjalan. |
-| FR-041 | FR-012, FR-014 | Foto hasil pekerjaan dan estimasi waktu merupakan bagian dari progress teknisi. |
+| FR-041 | FR-012, FR-014 | Estimasi waktu merupakan bagian dari progress teknisi. |
 | FR-042 | FR-028, FR-029 | Unduhan laporan ringkas membutuhkan laporan ringkas yang sudah tersedia. |
 | FR-043 | FR-028, FR-029 | Catatan tindak lanjut diberikan pada data laporan ringkas atau laporan yang sudah tersedia. |
 
@@ -152,7 +152,7 @@ Semua requirement yang sebelumnya belum diprioritaskan sebagai fitur formal suda
 
 ### Minimum Viable Scope
 1. Login dan role dasar: pelapor, administrator, teknisi, Manajer Fasilitas.
-2. Pembuatan laporan dengan data wajib, kategori, ruangan, urgensi, dan foto opsional.
+2. Pembuatan laporan dengan data wajib, kategori, ruangan, dan urgensi.
 3. Pemeriksaan, penolakan, dan alasan penolakan oleh administrator.
 4. Penugasan laporan valid kepada teknisi.
 5. Progress teknisi, status khusus, dan notifikasi aplikasi.

@@ -30,7 +30,7 @@ ASUMSI: Profil pengguna diturunkan dari aktor sistem pada requirement dan arsite
 | --- | --- | --- |
 | Pelapor | Cepat membuat laporan, mudah melihat status, dan mudah memberi tanggapan saat pekerjaan selesai. | Login, membuat laporan, melihat laporan, komentar, ubah/batalkan laporan, konfirmasi atau tolak hasil. |
 | Administrator | Perlu layar kerja yang padat, mudah memfilter laporan, dan cepat mengambil keputusan valid/tidak valid. | Review laporan, edit data, reject, assign teknisi, merge duplikat, close/reopen. |
-| Teknisi | Butuh daftar tugas yang jelas, prioritas terlihat, dan update progress cepat dari ponsel. | Melihat tugas, update progress/status, isi estimasi, URL foto, resolve, approve replacement. |
+| Teknisi | Butuh daftar tugas yang jelas, prioritas terlihat, dan update progress cepat dari ponsel. | Melihat tugas, update progress/status, isi estimasi, resolve, approve replacement. |
 | Manajer Fasilitas | Butuh ringkasan, filter, export CSV, dan catatan tindak lanjut. | Melihat dashboard, laporan ringkas, export CSV, update ruangan, catatan tindak lanjut. |
 
 ## Struktur Navigasi
@@ -100,7 +100,7 @@ Pesan error:
 | Lantai | Select | Ya | Pilih lantai berdasarkan gedung. |
 | Ruangan | Select | Ya | Pilih ruangan berdasarkan gedung dan lantai. |
 | Urgensi | Segmented control | Ya | LOW, MEDIUM, HIGH, URGENT. |
-| URL foto kerusakan | URL input | Tidak | Jika diisi harus format URL. |
+| (Dihapus) | | | |
 
 UX penting:
 - Gedung, lantai, dan ruangan memakai pilihan bertingkat agar pelapor tidak mengetik lokasi bebas.
@@ -147,7 +147,7 @@ Dialog konfirmasi:
 | Status pekerjaan | Select | Ya | IN_PROGRESS, NEED_HELP, WAITING_PARTS, PAUSED, RESOLVED. |
 | Catatan progress | Textarea | Ya | Tidak kosong. |
 | Estimasi selesai | Datetime input | Tidak | Waktu valid. |
-| URL foto hasil | URL input | Tidak | Jika diisi harus format URL. |
+| (Dihapus) | | | |
 
 UX penting:
 - Status umum dibuat sebagai tombol cepat.
@@ -213,7 +213,7 @@ ASUMSI: Warna final akan ditentukan pada implementasi UI, tetapi harus konsisten
 ### Pelapor Membuat Laporan
 1. Login.
 2. Buka `Buat Laporan`.
-3. Isi judul, deskripsi, kategori, gedung, lantai, ruangan, urgensi, dan URL foto opsional.
+3. Isi judul, deskripsi, kategori, gedung, lantai, ruangan, dan urgensi.
 4. Submit laporan.
 5. Sistem menampilkan nomor laporan dan status `SUBMITTED`.
 6. Pelapor dapat membuka detail laporan.

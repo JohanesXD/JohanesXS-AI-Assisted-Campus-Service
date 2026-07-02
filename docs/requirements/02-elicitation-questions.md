@@ -71,7 +71,7 @@ Menggali kebutuhan stakeholder terkait pelaporan masalah fasilitas kampus, pemer
 ### Progress Pekerjaan
 1. Apakah ada status progress lain selain butuh bantuan, tertunda, menunggu suku cadang, pekerjaan terjeda, dan masalah sudah ditangani?
 2. Apakah teknisi perlu menambahkan catatan progress?
-3. Apakah teknisi perlu mengunggah foto hasil pekerjaan?
+3. Apakah teknisi perlu mengunggah foto hasil pekerjaan? (Ditiadakan untuk efisiensi penyimpanan).
 4. Apakah teknisi perlu memperkirakan waktu penyelesaian?
 
 ### Penyelesaian Pekerjaan
@@ -102,13 +102,13 @@ Menggali kebutuhan stakeholder terkait pelaporan masalah fasilitas kampus, pemer
 
 ## Pertanyaan yang Belum Jelas
 1. Apakah kategori masalah dibuat tetap oleh sistem atau dapat ditambah administrator atau Manajer Fasilitas?
-2. Apakah bukti atau foto kerusakan hanya dapat diunggah saat membuat laporan, atau juga saat komentar lanjutan?
+2. (Dihapus) Apakah bukti atau foto kerusakan dapat digunakan? (Tidak didukung).
 3. Apakah Manajer Fasilitas hanya melihat data dan memperbarui daftar ruangan, atau dapat memberi catatan tindak lanjut?
 
 ## Pertanyaan yang Sudah Terjawab dari Elicitation Findings
 1. Pelapor harus login menggunakan akun kampus.
-2. Laporan berisi judul masalah, deskripsi, kategori, lokasi ruangan, tingkat urgensi, dan bukti atau foto opsional.
-3. Bukti atau foto kerusakan tidak wajib.
+2. Laporan berisi judul masalah, deskripsi, kategori, lokasi ruangan, dan tingkat urgensi (fitur bukti/foto ditiadakan).
+3. (Dihapus) Bukti atau foto kerusakan ditiadakan.
 4. Pelapor memilih lokasi dari daftar ruangan yang disediakan sistem.
 5. Daftar ruangan dapat diperbarui oleh Manajer Fasilitas jika ada ruangan baru.
 6. Administrator dapat menolak laporan jika judul tidak sesuai dengan deskripsi dan/atau kategori, laporan tanpa deskripsi, atau lokasi tidak diketahui maupun salah.

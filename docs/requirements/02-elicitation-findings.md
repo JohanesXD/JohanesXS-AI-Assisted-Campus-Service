@@ -26,7 +26,7 @@ Sistem digunakan oleh mahasiswa dan dosen untuk melaporkan masalah fasilitas kam
 | REQ-DRAFT-001 | STK-001, STK-002 | Pelapor harus login menggunakan akun kampus. |
 | REQ-DRAFT-002 | STK-001, STK-002 | Pelapor dapat membuat laporan masalah fasilitas kampus. |
 | REQ-DRAFT-003 | STK-001, STK-002 | Laporan berisi judul masalah, deskripsi, kategori masalah, dan lokasi ruangan. |
-| REQ-DRAFT-004 | STK-001, STK-002 | Pelapor dapat menyertakan bukti atau foto kerusakan jika tersedia, tetapi tidak wajib. |
+| REQ-DRAFT-004 | STK-001, STK-002 | (Dihapus) Fitur menyertakan bukti atau foto kerusakan ditiadakan untuk efisiensi penyimpanan. |
 | REQ-DRAFT-005 | STK-001, STK-002 | Kategori masalah mencakup proyektor, internet, AC, kursi, alat laboratorium, kebersihan ruangan, dan kategori fasilitas lainnya. |
 | REQ-DRAFT-006 | STK-001, STK-002 | Pelapor memilih lokasi dari daftar ruangan yang disediakan sistem. |
 | REQ-DRAFT-007 | STK-003 | Administrator dapat memeriksa laporan yang masuk. |
@@ -79,7 +79,7 @@ Sistem digunakan oleh mahasiswa dan dosen untuk melaporkan masalah fasilitas kam
 3. Deskripsi masalah.
 4. Kategori masalah fasilitas.
 5. Lokasi ruangan dari daftar ruangan sistem.
-6. Bukti atau foto kerusakan opsional.
+6. (Dihapus) Bukti atau foto kerusakan ditiadakan.
 7. Status laporan.
 8. Progress pekerjaan.
 9. Komentar pelapor.
@@ -94,7 +94,7 @@ Sistem digunakan oleh mahasiswa dan dosen untuk melaporkan masalah fasilitas kam
 
 ## Aturan Bisnis Awal
 1. Pelapor mahasiswa dan dosen harus menggunakan akun kampus.
-2. Bukti atau foto kerusakan tidak wajib.
+2. (Dihapus) Bukti atau foto kerusakan ditiadakan.
 3. Teknisi bergerak setelah mendapat laporan yang diberikan kepadanya.
 4. Pelapor memilih lokasi dari daftar ruangan yang disediakan sistem.
 5. Administrator dapat menolak laporan tidak valid.
@@ -140,3 +140,7 @@ Tidak ada untuk tahap elicitation awal. Kebutuhan yang sebelumnya belum jelas su
 
 ## Human Review
 Manusia perlu memeriksa apakah kebutuhan awal sudah mewakili kondisi kampus sebelum masuk ke specification.
+
+## Keputusan Human Review
+Tanggapan berikut diberikan oleh pengguna pada 2 Juli 2026:
+1. Kebutuhan awal sudah mewakili kondisi kampus.

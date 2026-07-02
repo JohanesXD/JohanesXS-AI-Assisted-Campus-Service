@@ -15,7 +15,7 @@ Sistem menggunakan arsitektur aplikasi web berbasis React, Cloudflare Workers, d
 
 ASUMSI: Pada tahap desain ini, autentikasi akun kampus dibuat sebagai modul autentikasi internal atau simulasi role terlebih dahulu sampai integrasi akun kampus nyata ditentukan.
 
-ASUMSI: Foto kerusakan dan foto hasil pekerjaan tidak disimpan sebagai file di sistem pada versi awal. Sistem hanya menyimpan URL foto jika pengguna menyediakannya.
+ASUMSI: Fitur foto ditiadakan sepenuhnya dari sistem untuk meminimalkan kebutuhan storage dan kompleksitas teknis.
 
 ## Tujuan Arsitektur
 1. Mendukung alur utama laporan dari pembuatan sampai penutupan.
@@ -34,7 +34,7 @@ ASUMSI: Foto kerusakan dan foto hasil pekerjaan tidak disimpan sebagai file di s
 | Request Management Module | Membuat, melihat, mengubah, membatalkan, memeriksa, menolak, dan menutup laporan. | FR-002 sampai FR-009, FR-016, FR-021, FR-031 sampai FR-034 |
 | Request Lifecycle Module | Mengelola status laporan, transisi status, konfirmasi pelapor, penutupan otomatis, pembukaan ulang, dan status akhir. | FR-012, FR-014, FR-018 sampai FR-021, FR-036 |
 | Assignment Module | Menugaskan teknisi, menambah teknisi saat butuh bantuan, dan mengganti teknisi dengan persetujuan teknisi lama dan baru. | FR-010, FR-011, FR-015, FR-040 |
-| Technician Work Module | Mengelola progress teknisi, status pekerjaan, estimasi waktu, dan URL foto hasil pekerjaan opsional. | FR-012, FR-014, FR-041 |
+| Technician Work Module | Mengelola progress teknisi, status pekerjaan, dan estimasi waktu. | FR-012, FR-014, FR-041 |
 | Comment and Note Module | Menyimpan komentar pelapor, catatan progress admin, dan catatan tindak lanjut Manajer Fasilitas. | FR-013, FR-017, FR-043 |
 | Notification Module | Membuat notifikasi aplikasi, riwayat notifikasi, dan status sudah dibaca. | FR-022, FR-023, FR-037, NFR-002 |
 | Room and Category Module | Menyediakan kategori fasilitas dan daftar ruangan berdasarkan gedung dan lantai. | FR-005, FR-006, FR-030, FR-035 |
@@ -125,7 +125,7 @@ stateDiagram-v2
 | --- | --- |
 | Pelapor | Membuat laporan, melihat laporan miliknya, memberi komentar, mengubah laporan dengan alasan, membatalkan laporan dengan alasan, mengonfirmasi selesai, menolak hasil pekerjaan dengan alasan, dan melihat notifikasi. |
 | Administrator | Melihat semua laporan, memeriksa validitas, menolak laporan, mengedit laporan dengan alasan, menugaskan teknisi, menyetujui bantuan teknisi, menggabungkan duplikat, mengajukan penggantian teknisi, membuka ulang laporan, dan menutup laporan. |
-| Teknisi | Melihat tugasnya, memperbarui progress, mengubah status pekerjaan, menyertakan estimasi atau URL foto, meminta bantuan, menyatakan selesai, dan memberi persetujuan penggantian teknisi. |
+| Teknisi | Melihat tugasnya, memperbarui progress, mengubah status pekerjaan, menyertakan estimasi waktu, meminta bantuan, menyatakan selesai, dan memberi persetujuan penggantian teknisi. |
 | Manajer Fasilitas | Melihat dashboard, laporan ringkas, export CSV, mengelola daftar ruangan, dan memberi catatan tindak lanjut. |
 
 ## Data Utama yang Dikelola
@@ -137,7 +137,7 @@ stateDiagram-v2
 | Room | Gedung, lantai, nama ruangan. | Room and Category Module |
 | Category | Nama kategori fasilitas. | Room and Category Module |
 | Assignment | Teknisi utama, teknisi tambahan, riwayat assignment, persetujuan penggantian. | Assignment Module |
-| Progress Update | Status pekerjaan, catatan teknisi, estimasi, URL foto. | Technician Work Module |
+| Progress Update | Status pekerjaan, catatan teknisi, estimasi. | Technician Work Module |
 | Comment | Komentar pelapor dan catatan tambahan. | Comment and Note Module |
 | Notification | Penerima, pesan, status dibaca, waktu dibuat. | Notification Module |
 | Audit Trail | Aktor, aksi, alasan, nilai sebelum, nilai sesudah, waktu. | Audit Trail Module |
@@ -149,7 +149,7 @@ stateDiagram-v2
 | --- | --- | --- | --- |
 | ADR-001 | Menggunakan React untuk frontend dan Cloudflare Worker sebagai API. | Sesuai referensi tugas dan struktur repo saat ini. | NFR-006 |
 | ADR-002 | Menggunakan Cloudflare D1 sebagai database utama. | Sesuai target teknologi proyek dan cukup untuk data relasional laporan. | NFR-004 |
-| ADR-003 | Menyimpan foto sebagai URL opsional, bukan file upload. | Human review memutuskan URL untuk menghemat storage file. | FR-004, FR-041 |
+| ADR-003 | Meniadakan fitur foto dari scope versi awal. | Meminimalkan penggunaan storage file dan menyederhanakan data input. | FR-004, FR-041 |
 | ADR-004 | Memisahkan lifecycle laporan dari request management. | Status laporan memiliki aturan kompleks dan perlu diuji terpisah. | FR-018 sampai FR-021, FR-036 |
 | ADR-005 | Semua aksi penting masuk audit trail. | Diperlukan untuk alasan penolakan, perubahan, pembatalan, edit admin, dan assignment. | NFR-004 |
 | ADR-006 | Export laporan ringkas menggunakan CSV. | Human review memutuskan CSV dan format ini mudah diuji. | FR-042 |
@@ -164,7 +164,7 @@ stateDiagram-v2
 | 08 UI Design | Perlu halaman role-based, layout responsif, request detail, admin review, technician task, dashboard, dan notification center. |
 | 09 Issue Planning | Issue dapat dikelompokkan per modul arsitektur dan prioritas Must/Should/Could. |
 | 12 Test Planning | Perlu test lifecycle status, role access, audit trail, notification, assignment, dan export CSV. |
-| 15 Deployment | Tidak membutuhkan layanan storage file tambahan pada versi awal karena foto memakai URL. |
+| 15 Deployment | Tidak membutuhkan layanan storage file tambahan karena fitur foto ditiadakan. |
 
 ## Risiko Arsitektur
 
@@ -174,7 +174,7 @@ stateDiagram-v2
 | Role access tidak konsisten | Pengguna dapat mengakses fitur yang bukan haknya. | Semua endpoint memeriksa role melalui Auth and Role Module. |
 | Audit trail tidak lengkap | Keputusan admin, teknisi, atau pelapor sulit ditelusuri. | Semua command penting wajib menulis audit trail dalam transaksi yang sama. |
 | Penggantian teknisi tertahan | Assignment tidak berubah jika satu teknisi belum menyetujui. | Gunakan status `PendingTechnicianReplacementApproval` dan tampilkan notifikasi ke kedua teknisi. |
-| URL foto tidak valid | Bukti visual tidak dapat dibuka. | Validasi format URL dan tampilkan sebagai lampiran opsional. |
+| Fitur foto ditiadakan | Tidak ada bukti visual dari pelapor/teknisi. | Pastikan deskripsi masalah dari pelapor dan penjelasan teknisi diisi dengan detail yang jelas. |
 | Dashboard lambat jika data bertambah | Query agregasi dapat membebani D1. | Mulai dengan query sederhana dan tambahkan index pada tahap database design. |
 
 ## Traceability Arsitektur
@@ -206,7 +206,7 @@ Human review tahap architecture design sudah dilakukan oleh pengguna pada 1 Juli
 1. Pembagian komponen disetujui dan dinilai sesuai kemampuan tim serta waktu proyek.
 2. Status lifecycle laporan sudah cukup jelas untuk dilanjutkan ke database dan API design.
 3. Asumsi autentikasi internal atau simulasi role dapat diterima untuk versi awal.
-4. Penyimpanan URL foto sudah sesuai keputusan scope.
+4. Keputusan untuk meniadakan fitur foto sudah disetujui.
 5. Export CSV sudah cukup untuk kebutuhan laporan ringkas.
 
 Tidak ada pertanyaan architecture design yang masih terbuka pada tahap ini.

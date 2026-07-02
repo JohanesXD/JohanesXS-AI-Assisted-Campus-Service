@@ -68,8 +68,7 @@ Mobile:
 | [ Gedung A v ] [ Lantai 2 v ] [ Ruang 201 v ]        |
 | Urgensi                                              |
 | [LOW] [MEDIUM] [HIGH] [URGENT]                       |
-| URL Foto Kerusakan Opsional                          |
-| [ https://...                                    ]   |
+|                                                      |
 |                                                      |
 | [ Batal ]                              [ Kirim ]     |
 +------------------------------------------------------+
@@ -77,7 +76,7 @@ Mobile:
 
 Validasi:
 - Judul, deskripsi, kategori, gedung, lantai, ruangan, dan urgensi wajib.
-- URL foto hanya divalidasi jika diisi.
+- (Dihapus)
 
 ## 4. Daftar Laporan
 
@@ -114,7 +113,7 @@ Status: IN_PROGRESS
 | Ringkasan                                             |
 | Pelapor: ... | Kategori: AC | Teknisi: ...           |
 | Deskripsi: ...                                       |
-| URL Foto: [Buka tautan]                              |
+|                                                      |
 +------------------------------------------------------+
 | Timeline Status                                      |
 | SUBMITTED -> UNDER_REVIEW -> ASSIGNED -> IN_PROGRESS |
@@ -216,8 +215,7 @@ Penggantian teknisi:
 | [                                                ]   |
 | Estimasi selesai opsional                            |
 | [ 2026-07-01 09:30 ]                                 |
-| URL foto hasil opsional                              |
-| [ https://...                                    ]   |
+|                                                      |
 | [Batal] [Simpan Progress]                            |
 +------------------------------------------------------+
 ```

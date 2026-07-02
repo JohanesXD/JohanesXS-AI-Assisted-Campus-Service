@@ -25,7 +25,7 @@ Desain ini adalah rancangan target berdasarkan requirement dan arsitektur. Imple
 
 ASUMSI: Autentikasi akun kampus pada versi awal memakai tabel `users` dan role internal sampai integrasi akun kampus nyata ditentukan. `users.id` tetap digunakan sebagai ID internal sistem untuk relasi antar tabel, sedangkan `campus_email` wajib dan unique sebagai identitas akun kampus.
 
-ASUMSI: Foto kerusakan dan foto hasil pekerjaan disimpan sebagai URL opsional, bukan file binary.
+ASUMSI: Fitur foto ditiadakan sepenuhnya dari scope desain database.
 
 ASUMSI: Semua timestamp disimpan sebagai `TEXT` ISO-8601 agar sederhana digunakan di Cloudflare D1.
 
@@ -36,11 +36,11 @@ ASUMSI: Semua timestamp disimpan sebagai `TEXT` ISO-8601 agar sederhana digunaka
 | `users` | Menyimpan pengguna dan role. | FR-001, NFR-001, NFR-003 |
 | `categories` | Menyimpan kategori masalah fasilitas. | FR-005 |
 | `rooms` | Menyimpan daftar ruangan berdasarkan gedung dan lantai. | FR-006, FR-030, FR-035 |
-| `service_requests` | Menyimpan data utama laporan. | FR-002, FR-003, FR-004, FR-016 |
+| `service_requests` | Menyimpan data utama laporan. | FR-002, FR-003, FR-016 |
 | `request_status_history` | Menyimpan riwayat status laporan. | FR-012, FR-014, FR-018 sampai FR-021, FR-036, NFR-004 |
 | `request_comments` | Menyimpan komentar pelapor dan catatan umum. | FR-017 |
 | `request_assignments` | Menyimpan teknisi utama/tambahan dan riwayat assignment. | FR-010, FR-011, FR-015, FR-040 |
-| `technician_progress` | Menyimpan update progress teknisi, estimasi, dan URL foto hasil pekerjaan. | FR-012, FR-014, FR-041 |
+| `technician_progress` | Menyimpan update progress teknisi dan estimasi. | FR-012, FR-014, FR-041 |
 | `notifications` | Menyimpan notifikasi aplikasi dan status dibaca. | FR-022, FR-023, FR-037 |
 | `audit_logs` | Menyimpan jejak aksi penting dan alasan. | FR-009, FR-013, FR-031 sampai FR-034, FR-038 sampai FR-040, FR-043, NFR-004 |
 | `request_duplicates` | Menyimpan relasi laporan duplikat dengan laporan utama. | FR-039 |
@@ -132,7 +132,7 @@ Index yang disarankan:
 | `room_id` | TEXT | FK `rooms.id` | Ya | Lokasi ruangan. |
 | `urgency` | TEXT |  | Ya | `LOW`, `MEDIUM`, `HIGH`, `URGENT`. |
 | `status` | TEXT |  | Ya | Status laporan saat ini. |
-| `damage_photo_url` | TEXT |  | Tidak | URL foto kerusakan opsional. |
+| `damage_photo_url` | TEXT |  | Tidak | (Dihapus/Ditiadakan). |
 | `rejection_reason` | TEXT |  | Tidak | Alasan penolakan laporan. |
 | `cancel_reason` | TEXT |  | Tidak | Alasan pembatalan pelapor. |
 | `resolution_rejected_reason` | TEXT |  | Tidak | Alasan pelapor menolak hasil pekerjaan. |
@@ -193,7 +193,7 @@ Index yang disarankan:
 | `status` | TEXT |  | Ya | Status pekerjaan. |
 | `note` | TEXT |  | Ya | Catatan progress. |
 | `estimated_completion_at` | TEXT |  | Tidak | Estimasi selesai. |
-| `result_photo_url` | TEXT |  | Tidak | URL foto hasil pekerjaan opsional. |
+| `result_photo_url` | TEXT |  | Tidak | (Dihapus/Ditiadakan). |
 | `created_at` | TEXT |  | Ya | Waktu dibuat. |
 
 ### `notifications`
@@ -257,7 +257,7 @@ Index yang disarankan:
 | --- | --- | --- |
 | `0001_initial.sql` | Tabel `service_requests` dasar. | Sudah ada di repo untuk tutorial awal. |
 | `0002_core_reference.sql` | `users`, `categories`, `rooms`. | Menambahkan role, kategori, dan lokasi terstruktur. |
-| `0003_requests_expand.sql` | Perluasan `service_requests`. | Menambahkan reporter, kategori ID, room ID, urgency, URL foto, dan field lifecycle. |
+| `0003_requests_expand.sql` | Perluasan `service_requests`. | Menambahkan reporter, kategori ID, room ID, urgency, dan field lifecycle. |
 | `0004_workflow.sql` | `request_status_history`, `request_assignments`, `technician_progress`, `request_duplicates`. | Mendukung lifecycle dan teknisi. |
 | `0005_interaction_and_audit.sql` | `request_comments`, `notifications`, `audit_logs`, `manager_follow_up_notes`. | Mendukung komentar, notifikasi, audit, dan catatan tindak lanjut. |
 
@@ -282,7 +282,7 @@ Index yang disarankan:
 - Setiap tabel memiliki tujuan.
 - Relasi antar tabel jelas.
 - Desain mendukung status lifecycle dan audit trail.
-- Desain tidak menyimpan file foto binary.
+- Desain tidak menyertakan kolom foto.
 - Desain mendukung export CSV tanpa tabel tambahan.
 
 ## Human Review
@@ -291,7 +291,7 @@ Human review tahap database design sudah dilakukan oleh pengguna pada 1 Juli 202
 ## Keputusan Human Review
 1. `users.id` tetap digunakan sebagai ID internal sistem, sedangkan `campus_email` wajib dan unique sebagai identitas akun kampus.
 2. Migration bertahap diterima.
-3. Penggunaan URL untuk foto sudah cukup di sisi database.
+3. Fitur foto ditiadakan dari skema database.
 4. Status laporan dan role pengguna sudah sesuai.
 5. Desain database dinilai sesuai dan tidak terlalu besar untuk versi awal. Jika nanti implementasi terasa terlalu besar, scope MVP akan didiskusikan kembali.
 

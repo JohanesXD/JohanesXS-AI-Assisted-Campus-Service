@@ -23,7 +23,7 @@ ASUMSI: Klarifikasi pengguna pada 30 Juni 2026 diperlakukan sebagai perubahan re
 | Kejelasan requirement | Cukup jelas | Sebagian besar requirement memakai aktor dan perilaku sistem yang jelas. |
 | Kemampuan diuji | Cukup dapat diuji | Acceptance criteria sudah tersedia, tetapi beberapa perlu diturunkan menjadi test case lebih spesifik pada tahap test planning. |
 | Traceability | Cukup baik | Requirement formal terhubung ke sumber, user story, dan prioritas. |
-| Scope | Terkendali | Mayoritas requirement masih sesuai scope. Upload foto tetap opsional dan direkomendasikan memakai URL agar tidak membebani Cloudflare free tier. |
+| Scope | Terkendali | Mayoritas requirement masih sesuai scope. Fitur foto sepenuhnya ditiadakan agar tidak membebani Cloudflare free tier dan menyederhanakan scope. |
 
 ## Validasi Kelengkapan
 
@@ -41,7 +41,7 @@ ASUMSI: Klarifikasi pengguna pada 30 Juni 2026 diperlakukan sebagai perubahan re
 | ID | Jenis Masalah | Alasan | Rekomendasi |
 | --- | --- | --- | --- |
 | NFR-006 | Catatan tambahan | NFR responsif sudah ditambahkan untuk memenuhi minimum 6 NFR dan mendukung penggunaan melalui desktop maupun ponsel. | Pastikan desain UI tahap berikutnya memperhatikan tampilan responsif. |
-| FR-004, FR-041 | Scope teknis | Referensi tugas menyebut upload foto tidak wajib karena object storage dapat memerlukan layanan tambahan. Human review memutuskan upload foto tetap opsional dan foto hasil pekerjaan memakai URL. | Tetap jadikan foto sebagai opsional dan gunakan URL foto hasil pekerjaan untuk menghemat storage file. |
+| FR-004, FR-041 | Scope teknis | Fitur foto ditiadakan dari scope proyek untuk efisiensi penyimpanan dan menghindari kompleksitas object storage. | Hapus seluruh input dan kolom foto dari dokumentasi. |
 | FR-018, FR-019, FR-020, FR-036 | Konsistensi alur status | Sistem menunggu konfirmasi 45 menit, dapat menutup otomatis, dan juga mengizinkan pelapor menolak hasil pekerjaan. | Pada desain arsitektur, definisikan status `RESOLVED`, `WAITING_REPORTER_CONFIRMATION`, `REOPEN_REQUESTED`, `REOPENED`, `CLOSED_AUTO`, dan `CLOSED_ADMIN` atau padanan yang disetujui. |
 | FR-021, FR-033, FR-036 | Kejelasan kewenangan admin | Administrator dapat menutup laporan, menutup laporan tidak valid setelah perubahan, dan membuka ulang laporan sesuai ketentuan. | Tulis business rule yang menjelaskan kapan admin boleh menutup, membuka ulang, atau menolak pembukaan ulang. |
 | FR-031, FR-032, FR-033 | Kejelasan proses perubahan | Pelapor dapat mengubah laporan, tetapi belum dijelaskan status laporan selama menunggu validasi ulang administrator. | Tambahkan status atau aturan bahwa laporan yang berubah kembali ke `Under Review` atau `Needs Admin Review`. |
@@ -75,7 +75,7 @@ ASUMSI: Klarifikasi pengguna pada 30 Juni 2026 diperlakukan sebagai perubahan re
 | Lanjut ke tahap 06 Architecture Design | Terima | Requirement cukup lengkap untuk mulai desain arsitektur. |
 | Pertahankan `NFR-006` pada desain UI dan acceptance test | Terima | Dibutuhkan agar requirement responsif tidak berhenti di dokumen specification saja. |
 | Definisikan state machine status laporan pada desain arsitektur | Terima | Mengurangi risiko konflik antara resolved, closed, reopened, cancelled, dan rejected. |
-| Perlakukan upload foto sebagai opsional atau enhancement berbasis URL | Terima | Selaras dengan human review dan menghindari kebutuhan object storage pada versi awal. |
+| Hilangkan fitur foto dari scope proyek | Terima | Selaras dengan keputusan penyederhanaan scope dan menghindari kompleksitas object storage. |
 | Buat aturan bisnis eksplisit untuk perubahan, pembatalan, penggabungan duplikat, dan penggantian teknisi | Terima | Dibutuhkan agar database, API, UI, dan test dapat dirancang konsisten. |
 
 ## Quality Check
@@ -88,7 +88,7 @@ ASUMSI: Klarifikasi pengguna pada 30 Juni 2026 diperlakukan sebagai perubahan re
 ## Keputusan Human Review
 Keputusan berikut diberikan pengguna pada 1 Juli 2026:
 
-1. Upload foto tetap opsional.
+1. Fitur foto ditiadakan sepenuhnya dari scope.
 2. Penggantian teknisi pada `FR-040` harus disetujui oleh teknisi lama dan teknisi baru.
 3. Format unduhan laporan ringkas pada `FR-042` menggunakan CSV.
 4. `NFR-006` sudah cukup untuk kebutuhan perangkat desktop dan ponsel.

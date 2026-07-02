@@ -21,7 +21,7 @@ ASUMSI: Change request yang dianalisis adalah klarifikasi pengguna pada 30 Juni 
 6. Administrator dapat mengedit kategori, lokasi, atau deskripsi dengan alasan.
 7. Administrator dapat menggabungkan laporan duplikat.
 8. Administrator dapat mengganti teknisi setelah laporan berjalan dengan persetujuan teknisi.
-9. Teknisi dapat menyertakan URL foto hasil pekerjaan atau memperkirakan waktu penyelesaian dengan penjelasan.
+9. Teknisi dapat memperkirakan waktu penyelesaian dengan penjelasan.
 10. Laporan ringkas dapat diunduh.
 11. Manajer Fasilitas dapat memberi catatan tindak lanjut dengan alasan.
 
@@ -37,7 +37,7 @@ ASUMSI: Change request yang dianalisis adalah klarifikasi pengguna pada 30 Juni 
 | Edit laporan oleh administrator | FR-038, FR-007, FR-008, FR-009, NFR-004, US-017 | Should |
 | Gabungkan laporan duplikat | FR-039, NFR-004, US-017 | Should |
 | Ganti teknisi dengan persetujuan | FR-040, FR-010, FR-011, NFR-004, US-017 | Should |
-| URL foto hasil pekerjaan atau estimasi waktu | FR-041, FR-012, FR-014, US-018 | Should |
+| Estimasi waktu penyelesaian | FR-041, FR-012, FR-014, US-018 | Should |
 | Unduh laporan ringkas | FR-042, FR-028, FR-029, US-020 | Should |
 | Catatan tindak lanjut Manajer Fasilitas | FR-043, FR-028, FR-029, US-020 | Should |
 
@@ -48,7 +48,7 @@ ASUMSI: Change request yang dianalisis adalah klarifikasi pengguna pada 30 Juni 
 | Scope requirement | Bertambah | Requirement formal bertambah dari `FR-001` sampai `FR-030` menjadi `FR-001` sampai `FR-043`. |
 | Scope versi awal | Bertambah terbatas | `FR-036` masuk Must karena memengaruhi kebenaran penutupan laporan. Sebagian fitur lain dapat menjadi Should. |
 | Scope teknis | Bertambah | Perlu riwayat perubahan, status tambahan, relasi duplikat, notifikasi terbaca, dan catatan tindak lanjut. |
-| Risiko scope creep | Rendah sampai sedang | Upload foto diputuskan tetap opsional dan memakai URL, sedangkan unduhan laporan memakai CSV. |
+| Risiko scope creep | Rendah | Fitur foto ditiadakan dari scope, sedangkan unduhan laporan memakai CSV. |
 
 ## Dampak Desain Arsitektur
 
@@ -72,7 +72,7 @@ ASUMSI: Change request yang dianalisis adalah klarifikasi pengguna pada 30 Juni 
 | Edit admin | Tambah audit trail untuk perubahan kategori, lokasi, atau deskripsi serta alasan edit. |
 | Laporan duplikat | Tambah `parent_request_id` atau tabel `request_duplicates`. |
 | Penggantian teknisi | Tambah tabel assignment history dan status persetujuan penggantian. |
-| URL foto atau estimasi teknisi | Tambah kolom estimasi, penjelasan, dan URL foto hasil pekerjaan jika tersedia. Tidak perlu menyimpan file foto asli. |
+| Estimasi teknisi | Tambah kolom estimasi dan penjelasan pekerjaan. |
 | Unduh laporan ringkas | Tidak wajib menambah tabel jika unduhan dihasilkan dari query. |
 | Catatan tindak lanjut | Tambah tabel manager follow-up notes dengan alasan, pembuat, dan waktu. |
 
@@ -89,7 +89,7 @@ ASUMSI: Change request yang dianalisis adalah klarifikasi pengguna pada 30 Juni 
 | Edit admin | `PATCH /api/admin/requests/:id` dengan alasan edit. |
 | Gabungkan duplikat | `POST /api/admin/requests/:id/merge` dengan referensi laporan utama. |
 | Ganti teknisi | Endpoint pengajuan dan persetujuan penggantian teknisi oleh teknisi lama dan teknisi baru. |
-| URL foto hasil atau estimasi | Endpoint update progress teknisi dengan penjelasan dan URL foto jika digunakan. |
+| Estimasi penyelesaian | Endpoint update progress teknisi dengan penjelasan dan estimasi waktu. |
 | Unduh laporan ringkas | `GET /api/reports/summary.csv` atau endpoint serupa. |
 | Catatan tindak lanjut | Endpoint untuk membuat dan melihat catatan tindak lanjut Manajer Fasilitas. |
 
@@ -105,7 +105,7 @@ ASUMSI: Change request yang dianalisis adalah klarifikasi pengguna pada 30 Juni 
 | Edit admin | Form admin untuk edit kategori, lokasi, deskripsi, dan alasan. |
 | Gabungkan duplikat | UI pilih laporan utama dan konfirmasi penggabungan. |
 | Ganti teknisi | UI pengajuan penggantian dan UI persetujuan untuk teknisi lama serta teknisi baru. |
-| URL foto hasil atau estimasi | Form update progress teknisi berisi estimasi, penjelasan, dan URL foto opsional. |
+| Estimasi penyelesaian | Form update progress teknisi berisi estimasi dan penjelasan. |
 | Unduh laporan ringkas | Tombol unduh pada halaman laporan ringkas. |
 | Catatan tindak lanjut | Form catatan tindak lanjut dan daftar catatan pada laporan ringkas atau detail laporan. |
 
@@ -123,7 +123,7 @@ ASUMSI: Change request yang dianalisis adalah klarifikasi pengguna pada 30 Juni 
 | Area | Dampak |
 | --- | --- |
 | Migration D1 | Perlu migration baru untuk tabel riwayat, notifikasi, ruangan, assignment history, dan catatan tindak lanjut. |
-| Cloudflare free tier | Aman untuk fitur berbasis D1 dan Worker. Foto hasil pekerjaan memakai URL sehingga tidak membutuhkan storage file tambahan pada versi awal. |
+| Cloudflare free tier | Aman untuk fitur berbasis D1 dan Worker. Tanpa adanya fitur foto, penyimpanan menjadi sangat hemat dan efisien. |
 | CI/CD | Test bertambah, tetapi tidak mengubah strategi deployment. |
 | Data seed | Perlu seed gedung, lantai, ruangan, kategori, role, dan teknisi contoh untuk pengujian. |
 
@@ -132,7 +132,7 @@ ASUMSI: Change request yang dianalisis adalah klarifikasi pengguna pada 30 Juni 
 | Risiko | Tingkat | Mitigasi |
 | --- | --- | --- |
 | Status laporan menjadi terlalu kompleks | Tinggi | Definisikan state machine sebelum desain database dan API. |
-| Upload foto memperbesar scope teknis | Rendah | Jadikan opsional dan gunakan URL, bukan penyimpanan file asli. |
+| Fitur foto memperbesar scope teknis | Rendah | Fitur foto ditiadakan sepenuhnya dari scope versi awal. |
 | Audit trail tidak lengkap | Sedang | Buat tabel riwayat yang dipakai semua aksi penting. |
 | Penggabungan duplikat menghilangkan data | Sedang | Jangan hapus laporan duplikat; simpan relasi ke laporan utama. |
 | Penggantian teknisi membingungkan | Sedang | Simpan persetujuan teknisi lama dan teknisi baru sebelum assignment berubah. |
@@ -147,7 +147,7 @@ ASUMSI: Change request yang dianalisis adalah klarifikasi pengguna pada 30 Juni 
 | FR-036 | Terima | Penting agar laporan tidak ditutup jika pekerjaan belum benar-benar selesai. |
 | FR-037 | Terima bertahap | Berguna, tetapi bisa dibangun setelah notifikasi dasar. |
 | FR-038 sampai FR-040 | Terima bertahap | Penting untuk admin, tetapi perlu audit trail dan aturan persetujuan. |
-| FR-041 | Terima dengan perubahan | Estimasi waktu diterima; foto hasil pekerjaan tetap opsional dan disimpan sebagai URL untuk menghemat storage file. |
+| FR-041 | Terima dengan perubahan | Estimasi waktu diterima; fitur foto ditiadakan sepenuhnya dari scope. |
 | FR-042 | Terima | Format unduhan laporan ringkas menggunakan CSV. |
 | FR-043 | Terima | Sudah dinaikkan menjadi Should oleh human review. |
 
@@ -162,7 +162,7 @@ ASUMSI: Change request yang dianalisis adalah klarifikasi pengguna pada 30 Juni 
 Keputusan berikut diberikan pengguna pada 1 Juli 2026:
 
 1. Analisis change request implisit diterima sebagai pengganti `change-request.md`.
-2. Foto hasil pekerjaan pada `FR-041` diubah agar memakai URL untuk menghemat pemakaian storage file.
+2. Fitur foto ditiadakan dari scope.
 3. Format unduhan laporan ringkas pada `FR-042` menggunakan CSV.
 4. Status final untuk cancelled, reopened, closed otomatis, dan closed admin sudah benar.
 

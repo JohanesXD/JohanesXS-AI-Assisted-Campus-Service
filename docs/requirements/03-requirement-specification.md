@@ -19,7 +19,7 @@ Sistem digunakan oleh mahasiswa dan dosen untuk melaporkan masalah fasilitas kam
 | FR-001 | Sistem harus mengizinkan mahasiswa dan dosen login menggunakan akun kampus sebelum membuat atau memantau laporan. | REQ-DRAFT-001 |
 | FR-002 | Sistem harus mengizinkan pelapor membuat laporan masalah fasilitas kampus. | REQ-DRAFT-002 |
 | FR-003 | Sistem harus menyimpan judul masalah, deskripsi, kategori masalah, lokasi ruangan, dan tingkat urgensi pada laporan. | REQ-DRAFT-003, REQ-DRAFT-025 |
-| FR-004 | Sistem harus mengizinkan pelapor menyertakan bukti atau foto kerusakan secara opsional. | REQ-DRAFT-004 |
+| FR-004 | (Dihapus) Fitur menyertakan bukti atau foto kerusakan ditiadakan. | REQ-DRAFT-004 |
 | FR-005 | Sistem harus menyediakan kategori masalah fasilitas seperti proyektor, internet, AC, kursi, alat laboratorium, kebersihan ruangan, dan kategori fasilitas lainnya. | REQ-DRAFT-005 |
 | FR-006 | Sistem harus mengizinkan pelapor memilih lokasi dari daftar ruangan yang disediakan sistem. | REQ-DRAFT-006 |
 | FR-007 | Sistem harus mengizinkan administrator memeriksa laporan yang masuk. | REQ-DRAFT-007 |
@@ -56,7 +56,7 @@ Sistem digunakan oleh mahasiswa dan dosen untuk melaporkan masalah fasilitas kam
 | FR-038 | Sistem harus mengizinkan administrator mengedit kategori, lokasi, atau deskripsi laporan sebelum menugaskan teknisi dengan menyertakan alasan. | Klarifikasi pengguna 30 Juni 2026 |
 | FR-039 | Sistem harus mengizinkan administrator menggabungkan laporan duplikat. | Klarifikasi pengguna 30 Juni 2026 |
 | FR-040 | Sistem harus mengizinkan administrator mengganti teknisi setelah laporan berjalan dengan persetujuan teknisi lama dan teknisi baru. | Klarifikasi pengguna 30 Juni 2026, Human review 1 Juli 2026 |
-| FR-041 | Sistem harus mengizinkan teknisi menyertakan URL foto hasil pekerjaan atau memperkirakan waktu penyelesaian dengan menyertakan penjelasan. | Klarifikasi pengguna 30 Juni 2026, Human review 1 Juli 2026 |
+| FR-041 | Sistem harus mengizinkan teknisi memperkirakan waktu penyelesaian dengan menyertakan penjelasan. | Klarifikasi pengguna 30 Juni 2026, Human review 1 Juli 2026 |
 | FR-042 | Sistem harus mengizinkan laporan ringkas diunduh. | Klarifikasi pengguna 30 Juni 2026 |
 | FR-043 | Sistem harus mengizinkan Manajer Fasilitas memberi catatan tindak lanjut dengan menyertakan alasan. | Klarifikasi pengguna 30 Juni 2026 |
 
@@ -76,7 +76,7 @@ Sistem digunakan oleh mahasiswa dan dosen untuk melaporkan masalah fasilitas kam
 | ID | User Story | Requirement Terkait |
 | --- | --- | --- |
 | US-001 | Sebagai mahasiswa atau dosen, saya ingin login menggunakan akun kampus agar hanya pengguna kampus yang dapat membuat dan memantau laporan. | FR-001, NFR-001 |
-| US-002 | Sebagai pelapor, saya ingin membuat laporan masalah fasilitas agar masalah kampus dapat diketahui dan ditangani. | FR-002, FR-003, FR-004, FR-005, FR-006 |
+| US-002 | Sebagai pelapor, saya ingin membuat laporan masalah fasilitas agar masalah kampus dapat diketahui dan ditangani. | FR-002, FR-003, FR-005, FR-006 |
 | US-003 | Sebagai administrator, saya ingin memeriksa laporan masuk agar laporan yang valid dapat diproses dan laporan tidak valid dapat ditolak. | FR-007, FR-008, FR-009 |
 | US-004 | Sebagai administrator, saya ingin menugaskan laporan kepada teknisi agar pekerjaan perbaikan dapat dimulai. | FR-010 |
 | US-005 | Sebagai teknisi, saya ingin melihat laporan yang diberikan kepada saya agar saya dapat menangani masalah fasilitas. | FR-011 |
@@ -92,7 +92,7 @@ Sistem digunakan oleh mahasiswa dan dosen untuk melaporkan masalah fasilitas kam
 | US-015 | Sebagai pelapor, saya ingin mengubah atau membatalkan laporan dengan alasan agar laporan yang saya kirim tetap sesuai kondisi sebenarnya. | FR-031, FR-032, FR-033, FR-034 |
 | US-016 | Sebagai pelapor, saya ingin menolak hasil pekerjaan dengan alasan agar laporan dapat dibuka ulang jika masalah belum selesai. | FR-036 |
 | US-017 | Sebagai administrator, saya ingin memperbaiki data laporan, menggabungkan laporan duplikat, dan mengganti teknisi sesuai aturan agar pengelolaan laporan tetap akurat. | FR-038, FR-039, FR-040 |
-| US-018 | Sebagai teknisi, saya ingin menambahkan foto hasil pekerjaan atau estimasi waktu dengan penjelasan agar progress pekerjaan lebih jelas. | FR-041 |
+| US-018 | Sebagai teknisi, saya ingin menambahkan estimasi waktu dengan penjelasan agar progress pekerjaan lebih jelas. | FR-041 |
 | US-019 | Sebagai pengguna sistem, saya ingin melihat riwayat notifikasi dan status sudah dibaca agar saya dapat melacak informasi yang sudah diterima. | FR-037 |
 | US-020 | Sebagai Manajer Fasilitas, saya ingin mengunduh laporan ringkas dan memberi catatan tindak lanjut agar hasil pemantauan dapat digunakan untuk tindakan berikutnya. | FR-042, FR-043 |
 
@@ -102,13 +102,12 @@ Sistem digunakan oleh mahasiswa dan dosen untuk melaporkan masalah fasilitas kam
 1. Jika mahasiswa atau dosen belum login, sistem tidak mengizinkan pengguna membuat laporan.
 2. Jika mahasiswa atau dosen berhasil login dengan akun kampus, sistem mengizinkan pengguna mengakses fitur pelaporan.
 
-### FR-002, FR-003, FR-004, FR-005, FR-006 Pembuatan Laporan
+### FR-002, FR-003, FR-005, FR-006 Pembuatan Laporan
 1. Jika pelapor mengisi judul masalah, deskripsi, kategori masalah, lokasi ruangan, dan tingkat urgensi, sistem dapat menyimpan laporan.
 2. Jika pelapor tidak mengisi deskripsi, sistem tidak dapat mengirim laporan sebagai laporan valid.
 3. Jika pelapor memilih kategori masalah dari daftar kategori fasilitas, sistem menyimpan kategori tersebut pada laporan.
 4. Jika pelapor memilih lokasi dari daftar ruangan, sistem menyimpan lokasi tersebut pada laporan.
-5. Jika pelapor menyertakan bukti atau foto, sistem menyimpan bukti tersebut bersama laporan.
-6. Jika pelapor tidak menyertakan bukti atau foto, sistem tetap dapat menyimpan laporan selama data wajib terpenuhi.
+5. (Dihapus) Bukti atau foto kerusakan ditiadakan.
 
 ### FR-007, FR-008, FR-009 Pemeriksaan dan Penolakan Laporan
 1. Administrator dapat melihat laporan yang masuk.
@@ -225,11 +224,11 @@ Sistem digunakan oleh mahasiswa dan dosen untuk melaporkan masalah fasilitas kam
 4. Jika teknisi lama dan teknisi baru menyetujui, sistem memperbarui teknisi yang menangani laporan.
 5. Jika salah satu teknisi tidak menyetujui, penggantian teknisi tidak dilakukan.
 
-### FR-041 URL Foto Hasil Pekerjaan dan Estimasi Teknisi
-1. Teknisi dapat menyertakan URL foto hasil pekerjaan.
+### FR-041 Estimasi Teknisi
+1. (Dihapus) Fitur menyertakan URL foto hasil pekerjaan ditiadakan.
 2. Teknisi dapat mengisi perkiraan waktu penyelesaian.
-3. Sistem meminta penjelasan saat teknisi menyertakan URL foto hasil pekerjaan atau mengisi perkiraan waktu penyelesaian.
-4. Sistem menyimpan URL foto, perkiraan waktu, dan penjelasan pada laporan.
+3. Sistem meminta penjelasan saat teknisi mengisi perkiraan waktu penyelesaian.
+4. Sistem menyimpan perkiraan waktu dan penjelasan pada laporan.
 
 ### FR-042 Unduh Laporan Ringkas
 1. Manajer Fasilitas dapat mengunduh laporan ringkas.
@@ -248,7 +247,7 @@ Bagian yang sebelumnya belum dispesifikasikan pada `03-requirement-specification
 | Source | Requirement Formal |
 | --- | --- |
 | REQ-DRAFT-001 | FR-001, NFR-001, US-001 |
-| REQ-DRAFT-002 sampai REQ-DRAFT-006, REQ-DRAFT-025 | FR-002 sampai FR-006, US-002 |
+| REQ-DRAFT-002 sampai REQ-DRAFT-006, REQ-DRAFT-025 | FR-002 sampai FR-003, FR-005 sampai FR-006, US-002 |
 | REQ-DRAFT-007, REQ-DRAFT-008, REQ-DRAFT-027 | FR-007 sampai FR-009, US-003 |
 | REQ-DRAFT-009, REQ-DRAFT-010 | FR-010, FR-011, US-004, US-005 |
 | REQ-DRAFT-011 sampai REQ-DRAFT-013, REQ-DRAFT-028, REQ-DRAFT-029 | FR-012 sampai FR-015, US-006 sampai US-008 |

@@ -54,6 +54,7 @@ Hal berikut belum termasuk scope karena belum disebutkan pada input:
 5. Integrasi dengan email, WhatsApp, atau notifikasi eksternal.
 6. Penilaian kinerja teknisi.
 7. Dashboard analitik tingkat lanjut di luar laporan ringkas manajer fasilitas.
+8. Fitur upload foto atau pengiriman bukti visual (gambar/foto).
 
 ## Alur Proses Awal
 1. Mahasiswa atau dosen membuat laporan masalah fasilitas.
@@ -79,7 +80,7 @@ Hal berikut belum termasuk scope karena belum disebutkan pada input:
 2. Data apa saja yang wajib diisi saat membuat laporan?
    - Jawaban: Judul masalah, deskripsi, dan kategori masalah fasilitas seperti proyektor, internet, AC, alat laboratorium, dan sebagainya.
 3. Apakah laporan harus menyertakan foto atau bukti kerusakan?
-   - Jawaban: Tidak harus, tetapi jika tersedia maka pelapor dapat menyertakan bukti atau foto kerusakan.
+   - Jawaban: Tidak, fitur upload foto atau bukti kerusakan dalam bentuk gambar tidak didukung pada versi awal untuk menghindari kompleksitas object storage.
 4. Apakah lokasi fasilitas menggunakan daftar ruangan tetap atau input manual?
    - Jawaban: Iya, lokasi fasilitas menggunakan daftar ruangan manual.
 5. Apakah administrator dapat menolak laporan yang tidak valid?
@@ -116,3 +117,11 @@ Bagian yang perlu diperiksa manusia:
 2. Apakah scope awal sesuai kebutuhan kampus.
 3. Apakah asumsi dapat diterima.
 4. Apakah pertanyaan terbuka yang tersisa perlu dijawab sebelum masuk ke elicitation.
+
+## Keputusan Human Review
+Tanggapan berikut diberikan oleh pengguna pada 2 Juli 2026:
+1. Stakeholder sudah lengkap.
+2. Scope awal sudah cukup, dengan catatan bahwa untuk laporan masalah fasilitas ada pemilihan lokasi yang berdasarkan gedung dan lantai.
+3. Asumsi dapat diterima karena masih berada pada tahap inception.
+4. Pertanyaan terbuka yang tersisa perlu dijawab sebelum masuk ke elicitation.
+5. Semua pertanyaan terbuka sudah dijawab.
