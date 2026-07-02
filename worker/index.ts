@@ -1,9 +1,9 @@
 interface Env {
-DB: D1Database;
+  DB: D1Database;
 }
 
 function json(data: unknown, status = 200) {
-return Response.json(data, { status });
+  return Response.json(data, { status });
 }
 
 // Helper to validate campus email format
@@ -16,138 +16,200 @@ function isValidCampusEmail(email: string): boolean {
 }
 
 export default {
-async fetch(request: Request, env: Env): Promise<Response> {
-const url = new URL(request.url);
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const url = new URL(request.url);
 
-// Endpoint Health Check (tidak memerlukan auth)
-if (url.pathname === "/api/health" && request.method === "GET") {
-return json({ status: "ok" });
-}
-
-// Endpoint Login (tidak memerlukan auth)
-if (url.pathname === "/api/auth/login" && request.method === "POST") {
-  const input = await request.json() as {
-    email?: string;
-    role?: string;
-  };
-
-  if (!input.email || !input.role) {
-    return json({ error: "Email kampus dan role wajib diisi." }, 422);
-  }
-
-  const email = input.email.trim();
-  const role = input.role.trim();
-
-  if (!isValidCampusEmail(email)) {
-    return json({ error: "Format email kampus tidak valid (harus *.ac.id)." }, 422);
-  }
-
-  if (!["REPORTER", "ADMIN", "TECHNICIAN", "FACILITY_MANAGER"].includes(role)) {
-    return json({ error: "Role tidak valid." }, 422);
-  }
-
-  // Cari user di database D1
-  const existingUser = await env.DB.prepare(`
-    SELECT id, campus_email, name, role FROM users WHERE campus_email = ?
-  `).bind(email).first<{ id: string; campus_email: string; name: string; role: string }>();
-
-  if (existingUser) {
-    return json({ user: existingUser }, 200);
-  }
-
-  // Jika user tidak ditemukan, daftarkan otomatis
-  const id = `usr-${crypto.randomUUID()}`;
-  const prefix = email.split("@")[0];
-  const name = prefix
-    .replace(/[._-]/g, " ")
-    .split(" ")
-    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(" ");
-
-  await env.DB.prepare(`
-    INSERT INTO users (id, campus_email, name, role)
-    VALUES (?, ?, ?, ?)
-  `).bind(id, email, name, role).run();
-
-  return json({
-    user: { id, campus_email: email, name, role }
-  }, 201);
-}
-
-// Otorisasi Global untuk endpoint /api/requests
-if (url.pathname.startsWith("/api/requests")) {
-  const userEmail = request.headers.get("X-User-Email");
-  const userRole = request.headers.get("X-User-Role");
-
-  if (!userEmail || !userRole) {
-    return json({ error: "Unauthorized. Silakan login terlebih dahulu." }, 401);
-  }
-
-  // GET /api/requests
-  if (request.method === "GET") {
-    const result = await env.DB.prepare(`
-    SELECT id, request_number, title, location,
-    category, priority, status
-    FROM service_requests
-    ORDER BY created_at DESC
-    `).all();
-
-    return json({ data: result.results });
-  }
-
-  // POST /api/requests
-  if (request.method === "POST") {
-    if (userRole !== "REPORTER") {
-      return json({ error: "Hanya pelapor (REPORTER) yang dapat membuat laporan baru." }, 403);
+    // Endpoint Health Check (tidak memerlukan auth)
+    if (url.pathname === "/api/health" && request.method === "GET") {
+      return json({ status: "ok" });
     }
 
-    const input = await request.json() as {
-      title?: string;
-      description?: string;
-      location?: string;
-      category?: string;
-    };
+    // Endpoint Login (tidak memerlukan auth)
+    if (url.pathname === "/api/auth/login" && request.method === "POST") {
+      const input = await request.json() as {
+        email?: string;
+        role?: string;
+      };
 
-    if (
-      !input.title ||
-      !input.description ||
-      !input.location ||
-      !input.category
-    ) {
-      return json({ error: "Semua field wajib diisi." }, 422);
-    }
+      if (!input.email || !input.role) {
+        return json({ error: "Email kampus dan role wajib diisi." }, 422);
+      }
 
-    if (input.description.trim().length < 20) {
+      const email = input.email.trim();
+      const role = input.role.trim();
+
+      if (!isValidCampusEmail(email)) {
+        return json({ error: "Format email kampus tidak valid (harus *.ac.id)." }, 422);
+      }
+
+      if (!["REPORTER", "ADMIN", "TECHNICIAN", "FACILITY_MANAGER"].includes(role)) {
+        return json({ error: "Role tidak valid." }, 422);
+      }
+
+      // Cari user di database D1
+      const existingUser = await env.DB.prepare(`
+        SELECT id, campus_email, name, role FROM users WHERE campus_email = ?
+      `).bind(email).first<{ id: string; campus_email: string; name: string; role: string }>();
+
+      if (existingUser) {
+        return json({ user: existingUser }, 200);
+      }
+
+      // Jika user tidak ditemukan, daftarkan otomatis
+      const id = `usr-${crypto.randomUUID()}`;
+      const prefix = email.split("@")[0];
+      const name = prefix
+        .replace(/[._-]/g, " ")
+        .split(" ")
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(" ");
+
+      await env.DB.prepare(`
+        INSERT INTO users (id, campus_email, name, role)
+        VALUES (?, ?, ?, ?)
+      `).bind(id, email, name, role).run();
+
       return json({
-        error: "Deskripsi minimal 20 karakter."
-      }, 422);
+        user: { id, campus_email: email, name, role }
+      }, 201);
     }
 
-    const id = crypto.randomUUID();
-    const requestNumber = `CSR-${Date.now()}`;
+    // Otorisasi Global untuk Endpoint yang Membutuhkan Login
+    const userEmail = request.headers.get("X-User-Email");
+    const userRole = request.headers.get("X-User-Role");
 
-    await env.DB.prepare(`
-      INSERT INTO service_requests
-      (id, request_number, title, description,
-      location, category, priority, status)
-      VALUES (?, ?, ?, ?, ?, ?, 'MEDIUM', 'SUBMITTED')
-    `).bind(
-      id,
-      requestNumber,
-      input.title.trim(),
-      input.description.trim(),
-      input.location.trim(),
-      input.category.trim()
-    ).run();
+    if (!userEmail || !userRole) {
+      return json({ error: "Unauthorized. Silakan login terlebih dahulu." }, 401);
+    }
 
-    return json({
-      id,
-      requestNumber,
-      status: "SUBMITTED"
-    }, 201);
+    // Ambil data User dari DB berdasarkan email
+    const currentUser = await env.DB.prepare(`
+      SELECT id, campus_email, name, role FROM users WHERE campus_email = ?
+    `).bind(userEmail).first<{ id: string; campus_email: string; name: string; role: string }>();
+
+    if (!currentUser) {
+      return json({ error: "Sesi pengguna tidak valid. Silakan login kembali." }, 401);
+    }
+
+    // Endpoint GET /api/categories
+    if (url.pathname === "/api/categories" && request.method === "GET") {
+      const result = await env.DB.prepare(`
+        SELECT id, name FROM categories WHERE is_active = 1 ORDER BY name ASC
+      `).all();
+      return json({ data: result.results });
+    }
+
+    // Endpoint GET /api/rooms
+    if (url.pathname === "/api/rooms" && request.method === "GET") {
+      const result = await env.DB.prepare(`
+        SELECT id, building, floor, room_name FROM rooms WHERE is_active = 1 ORDER BY building ASC, floor ASC, room_name ASC
+      `).all();
+      return json({ data: result.results });
+    }
+
+    // Endpoint /api/requests
+    if (url.pathname.startsWith("/api/requests")) {
+      
+      // GET /api/requests
+      if (request.method === "GET") {
+        let query = `
+          SELECT sr.id, sr.request_number, sr.title, sr.status, sr.urgency, sr.created_at,
+                 c.name AS category,
+                 r.building || ' - ' || r.floor || ' - ' || r.room_name AS location
+          FROM service_requests sr
+          JOIN categories c ON sr.category_id = c.id
+          JOIN rooms r ON sr.room_id = r.id
+        `;
+        let params: string[] = [];
+
+        // Jika Reporter, filter hanya laporan miliknya sendiri
+        if (currentUser.role === "REPORTER") {
+          query += " WHERE sr.reporter_id = ?";
+          params.push(currentUser.id);
+        }
+
+        query += " ORDER BY sr.created_at DESC";
+
+        const result = await env.DB.prepare(query).bind(...params).all();
+        return json({ data: result.results });
+      }
+
+      // POST /api/requests
+      if (request.method === "POST") {
+        if (currentUser.role !== "REPORTER") {
+          return json({ error: "Hanya pelapor (REPORTER) yang dapat membuat laporan baru." }, 403);
+        }
+
+        const input = await request.json() as {
+          title?: string;
+          description?: string;
+          category_id?: string;
+          room_id?: string;
+          urgency?: string;
+        };
+
+        if (
+          !input.title ||
+          !input.description ||
+          !input.category_id ||
+          !input.room_id ||
+          !input.urgency
+        ) {
+          return json({ error: "Semua field wajib diisi." }, 422);
+        }
+
+        if (input.description.trim().length < 20) {
+          return json({ error: "Deskripsi minimal 20 karakter." }, 422);
+        }
+
+        if (!["LOW", "MEDIUM", "HIGH", "URGENT"].includes(input.urgency)) {
+          return json({ error: "Tingkat urgensi tidak valid." }, 422);
+        }
+
+        // Verifikasi keberadaan Kategori
+        const categoryExists = await env.DB.prepare(`
+          SELECT id FROM categories WHERE id = ? AND is_active = 1
+        `).bind(input.category_id).first();
+
+        if (!categoryExists) {
+          return json({ error: "Kategori tidak valid." }, 422);
+        }
+
+        // Verifikasi keberadaan Ruangan
+        const roomExists = await env.DB.prepare(`
+          SELECT id FROM rooms WHERE id = ? AND is_active = 1
+        `).bind(input.room_id).first();
+
+        if (!roomExists) {
+          return json({ error: "Ruangan tidak valid." }, 422);
+        }
+
+        const id = crypto.randomUUID();
+        const requestNumber = `CSR-${Date.now()}`;
+
+        await env.DB.prepare(`
+          INSERT INTO service_requests
+          (id, request_number, reporter_id, title, description, category_id, room_id, urgency, status)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'SUBMITTED')
+        `).bind(
+          id,
+          requestNumber,
+          currentUser.id,
+          input.title.trim(),
+          input.description.trim(),
+          input.category_id,
+          input.room_id,
+          input.urgency
+        ).run();
+
+        return json({
+          id,
+          requestNumber,
+          status: "SUBMITTED"
+        }, 201);
+      }
+    }
+
+    return json({ error: "Alamat API tidak ditemukan." }, 404);
   }
-}
-
-return json({ error: "Alamat API tidak ditemukan." }, 404);
-}
 } satisfies ExportedHandler<Env>;
