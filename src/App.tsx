@@ -5,11 +5,13 @@ type ServiceRequest = {
   id: string;
   request_number: string;
   title: string;
+  description?: string;
   location: string; // Gedung - Lantai - Ruangan
   category: string;  // Category name
   priority: string;
   status: string;
   urgency: string;
+  rejection_reason?: string;
 };
 
 type UserSession = {
