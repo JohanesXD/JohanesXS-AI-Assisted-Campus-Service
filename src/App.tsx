@@ -5,11 +5,13 @@ type ServiceRequest = {
   id: string;
   request_number: string;
   title: string;
+  description?: string;
   location: string; // Gedung - Lantai - Ruangan
   category: string;  // Category name
   priority: string;
   status: string;
   urgency: string;
+  rejection_reason?: string;
 };
 
 type UserSession = {
@@ -55,6 +57,12 @@ export default function App() {
   const [selectedBuilding, setSelectedBuilding] = useState("");
   const [selectedFloor, setSelectedFloor] = useState("");
   const [selectedRoomId, setSelectedRoomId] = useState("");
+
+  // Admin Action States
+  const [selectedRequest, setSelectedRequest] = useState<ServiceRequest | null>(null);
+  const [rejectionReasonInput, setRejectionReasonInput] = useState("");
+  const [adminError, setAdminError] = useState("");
+  const [adminSuccess, setAdminSuccess] = useState("");
 
   // Load session from localStorage on mount
   useEffect(() => {
@@ -212,6 +220,46 @@ export default function App() {
     setLoginError("");
     setCategoriesList([]);
     setRoomsList([]);
+    setSelectedRequest(null);
+    setRejectionReasonInput("");
+    setAdminError("");
+    setAdminSuccess("");
+  }
+
+  async function handleReject(requestId: string) {
+    setAdminError("");
+    setAdminSuccess("");
+
+    if (!rejectionReasonInput.trim() || rejectionReasonInput.trim().length < 5) {
+      setAdminError("Alasan penolakan minimal 5 karakter.");
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/requests/${requestId}/reject`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-User-Email": user?.campus_email ?? "",
+          "X-User-Role": user?.role ?? ""
+        },
+        body: JSON.stringify({ reason: rejectionReasonInput })
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        setAdminError(result.error ?? "Gagal menolak laporan.");
+        return;
+      }
+
+      setAdminSuccess("Laporan berhasil ditolak.");
+      setRejectionReasonInput("");
+      setSelectedRequest(null);
+      await loadRequests();
+    } catch (e) {
+      setAdminError("Koneksi bermasalah. Gagal mengirim penolakan.");
+    }
   }
 
   async function submitRequest(event: React.FormEvent) {
@@ -483,38 +531,138 @@ export default function App() {
       {user.role === "ADMIN" && (
         <main className="workspace-container">
           <h1>Layar Kerja Administrator</h1>
-          <p>Kelola antrean review, validasi laporan, dan tugaskan teknisi.</p>
+          <p style={{ marginBottom: 32 }}>Kelola antrean review, validasi laporan, dan tugaskan teknisi.</p>
 
-          <div className="placeholder-view">
-            <h3 style={{ margin: "0 0 8px", color: "var(--text-h)" }}>Antrean Laporan Masuk (Review)</h3>
-            <p>Fitur pengelolaan antrean admin akan diimplementasikan pada tahap issue berikutnya.</p>
-            
-            {requests.length > 0 && (
-              <table className="premium-table" style={{ maxWidth: 750, margin: "24px auto 0" }}>
-                <thead>
-                  <tr>
-                    <th>Nomor</th>
-                    <th>Judul</th>
-                    <th>Lokasi</th>
-                    <th>Kategori</th>
-                    <th>Urgensi</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {requests.map((item) => (
-                    <tr key={item.id}>
-                      <td><code>{item.request_number}</code></td>
-                      <td>{item.title}</td>
-                      <td>{item.location}</td>
-                      <td>{item.category}</td>
-                      <td>{item.urgency}</td>
-                      <td>{item.status}</td>
+          {adminSuccess && <div className="alert-success">{adminSuccess}</div>}
+          {adminError && <div className="alert-error">{adminError}</div>}
+
+          <div className="flex-container">
+            <div className="flex-main">
+              <h2>Antrean Laporan Masuk</h2>
+              {requests.filter(item => ["SUBMITTED", "UNDER_REVIEW", "REJECTED"].includes(item.status)).length === 0 ? (
+                <div className="placeholder-view">
+                  <p>Tidak ada laporan dalam antrean review saat ini.</p>
+                </div>
+              ) : (
+                <table className="premium-table">
+                  <thead>
+                    <tr>
+                      <th>Nomor</th>
+                      <th>Judul</th>
+                      <th>Lokasi</th>
+                      <th>Kategori</th>
+                      <th>Status</th>
+                      <th>Aksi</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
+                  </thead>
+                  <tbody>
+                    {requests.filter(item => ["SUBMITTED", "UNDER_REVIEW", "REJECTED"].includes(item.status)).map((item) => (
+                      <tr key={item.id} style={{ cursor: "pointer" }} onClick={() => {
+                        setSelectedRequest(item);
+                        setRejectionReasonInput("");
+                        setAdminError("");
+                        setAdminSuccess("");
+                      }}>
+                        <td><code>{item.request_number}</code></td>
+                        <td style={{ fontWeight: 600 }}>{item.title}</td>
+                        <td style={{ fontSize: 13 }}>{item.location}</td>
+                        <td>{item.category}</td>
+                        <td>
+                          <span className={`status-indicator ${item.status.toLowerCase() === 'rejected' ? 'progress' : 'submitted'}`} 
+                                style={item.status === 'REJECTED' ? { background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444' } : {}}>
+                            {item.status}
+                          </span>
+                        </td>
+                        <td>
+                          <button className="btn-logout" style={{ padding: "4px 8px", fontSize: 12 }}>Tinjau</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            <div className="flex-side">
+              <h2>Detail Peninjauan</h2>
+              {selectedRequest ? (
+                <div className="premium-card" style={{ maxWidth: "100%", padding: 24, background: "var(--social-bg)" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+                    <code style={{ fontSize: 14 }}>{selectedRequest.request_number}</code>
+                    <span className="role-badge" style={{ fontSize: 11 }}>{selectedRequest.urgency}</span>
+                  </div>
+
+                  <h3 style={{ margin: "0 0 16px", color: "var(--text-h)", fontSize: 20 }}>{selectedRequest.title}</h3>
+                  
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", textTransform: "uppercase", letterSpacing: 0.5 }}>Lokasi</div>
+                    <div style={{ color: "var(--text-h)", fontSize: 15 }}>{selectedRequest.location}</div>
+                  </div>
+
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", textTransform: "uppercase", letterSpacing: 0.5 }}>Kategori</div>
+                    <div style={{ color: "var(--text-h)", fontSize: 15 }}>{selectedRequest.category}</div>
+                  </div>
+
+                  <div style={{ marginBottom: 20 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", textTransform: "uppercase", letterSpacing: 0.5 }}>Deskripsi</div>
+                    <div style={{ color: "var(--text-h)", fontSize: 14, background: "var(--bg)", padding: 12, borderRadius: 6, border: "1px solid var(--border)", whiteSpace: "pre-line" }}>
+                      {selectedRequest.description}
+                    </div>
+                  </div>
+
+                  {selectedRequest.status === "REJECTED" && (
+                    <div style={{ marginBottom: 20, padding: 12, background: "rgba(239, 68, 68, 0.05)", border: "1px solid rgba(239, 68, 68, 0.2)", borderRadius: 6 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: "#ef4444" }}>ALASAN PENOLAKAN</div>
+                      <div style={{ color: "var(--text-h)", fontSize: 14, marginTop: 4 }}>{selectedRequest.rejection_reason}</div>
+                    </div>
+                  )}
+
+                  {selectedRequest.status !== "REJECTED" ? (
+                    <div>
+                      <div className="form-group">
+                        <label style={{ fontSize: 12 }}>Alasan Penolakan (Wajib jika menolak)</label>
+                        <textarea
+                          placeholder="Tulis alasan mengapa laporan ini tidak valid..."
+                          value={rejectionReasonInput}
+                          onChange={(e) => setRejectionReasonInput(e.target.value)}
+                          rows={3}
+                          className="form-textarea"
+                          style={{ fontSize: 14 }}
+                        />
+                      </div>
+                      
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                        <button 
+                          onClick={() => handleReject(selectedRequest.id)}
+                          className="btn-logout"
+                          style={{ borderColor: "#ef4444", color: "#ef4444", fontWeight: 600 }}
+                        >
+                          Tolak Laporan
+                        </button>
+                        <button 
+                          className="btn-primary"
+                          disabled
+                          style={{ opacity: 0.5, cursor: "not-allowed", fontSize: 14 }}
+                        >
+                          Tugaskan (Issue 4)
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button 
+                      onClick={() => setSelectedRequest(null)}
+                      className="btn-logout"
+                      style={{ width: "100%" }}
+                    >
+                      Tutup Peninjauan
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <p style={{ color: "var(--text)", marginTop: 16 }}>Pilih salah satu laporan di antrean untuk melakukan peninjauan.</p>
+              )}
+            </div>
           </div>
         </main>
       )}

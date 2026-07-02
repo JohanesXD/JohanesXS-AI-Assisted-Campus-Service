@@ -107,13 +107,45 @@ export default {
       return json({ data: result.results });
     }
 
+    // Endpoint POST /api/requests/:id/reject
+    const rejectMatch = url.pathname.match(/^\/api\/requests\/([a-zA-Z0-9-]+)\/reject$/);
+    if (rejectMatch && request.method === "POST") {
+      if (currentUser.role !== "ADMIN") {
+        return json({ error: "Hanya administrator (ADMIN) yang dapat menolak laporan." }, 403);
+      }
+
+      const requestId = rejectMatch[1];
+      const input = await request.json() as { reason?: string };
+
+      if (!input.reason || input.reason.trim().length < 5) {
+        return json({ error: "Alasan penolakan wajib diisi (minimal 5 karakter)." }, 422);
+      }
+
+      // Pastikan laporan ada
+      const checkRequest = await env.DB.prepare(`
+        SELECT id, status FROM service_requests WHERE id = ?
+      `).bind(requestId).first<{ id: string; status: string }>();
+
+      if (!checkRequest) {
+        return json({ error: "Laporan tidak ditemukan." }, 404);
+      }
+
+      await env.DB.prepare(`
+        UPDATE service_requests
+        SET status = 'REJECTED', rejection_reason = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).bind(input.reason.trim(), requestId).run();
+
+      return json({ success: true, status: "REJECTED" }, 200);
+    }
+
     // Endpoint /api/requests
     if (url.pathname.startsWith("/api/requests")) {
       
       // GET /api/requests
       if (request.method === "GET") {
         let query = `
-          SELECT sr.id, sr.request_number, sr.title, sr.status, sr.urgency, sr.created_at,
+          SELECT sr.id, sr.request_number, sr.title, sr.description, sr.status, sr.urgency, sr.rejection_reason, sr.created_at,
                  c.name AS category,
                  r.building || ' - ' || r.floor || ' - ' || r.room_name AS location
           FROM service_requests sr
