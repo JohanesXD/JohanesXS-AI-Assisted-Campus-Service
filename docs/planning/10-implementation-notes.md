@@ -1,59 +1,34 @@
 # 10 Implementation Notes: FR-001 - Login Akun Kampus
 
-Dokumen ini mencatat detail implementasi, hasil pengujian, dan riwayat review untuk Issue 1 ([FR-001]) tentang Login Akun Kampus dan Kontrol Hak Akses.
+## Issue
+Closes #1
 
----
+## Requirement
+- **FR:** FR-001 (Login dengan akun kampus sebelum membuat/memantau laporan), NFR-001 (Akses terbatas untuk user login), NFR-003 (Pemisahan role REPORTER, ADMIN, TECHNICIAN, FACILITY_MANAGER).
+- **AC:** AC-001 (Sistem menghalangi akses pelaporan jika belum login), AC-002 (Akses halaman sesuai role setelah login).
 
-## PR: FR-01 - Login Akun Kampus
+## Perubahan
+1. **Database Migration (`0002_core_reference.sql`)**: Membuat tabel `users`, `categories`, dan `rooms` beserta data awal (*seed data*) untuk pengujian role.
+2. **Worker API (`worker/index.ts`)**:
+   - Menambahkan endpoint `POST /api/auth/login` untuk autentikasi dan pendaftaran otomatis akun kampus.
+   - Menambahkan otorisasi global berbasis header `X-User-Email` dan `X-User-Role` untuk endpoint `/api/requests`.
+3. **Frontend (`src/App.tsx` & `src/App.css`)**:
+   - Membuat Form Login dengan validasi email kampus (harus `.ac.id` / `campus.ac.id`) dan dropdown pilihan peran (simulasi role).
+   - Menyimpan sesi pengguna di `localStorage` dan menampilkan navigasi *header* global dengan tombol Logout.
+   - Membuat tampilan halaman terpisah berdasarkan role (Reporter, Admin, Teknisi, Manajer Fasilitas).
+4. **Testing (`package.json` & `tests/unit/auth-validation.test.ts`)**:
+   - Memasang `vitest` dan membuat unit test untuk memvalidasi format email kampus.
 
-### Goal
-Mengimplementasikan form login simulasi dan pembatasan hak akses berbasis peran (REPORTER, ADMIN, TECHNICIAN, FACILITY_MANAGER) baik di sisi frontend maupun backend, lengkap dengan migrasi database dan pengujian unit.
+## Test
+* [x] Test dijalankan
+* [x] Build berhasil
+* [x] Dicoba di browser
 
-### Changes
-1. **[0002_core_reference.sql](file:///C:/Users/USER/.gemini/antigravity/scratch/JohanesXS-AI-Assisted-Campus-Service/database/migrations/0002_core_reference.sql)**: Membuat tabel `users`, `categories`, `rooms` dan memasukkan data awal (*seed data*).
-2. **[worker/index.ts](file:///C:/Users/USER/.gemini/antigravity/scratch/JohanesXS-AI-Assisted-Campus-Service/worker/index.ts)**: Menambahkan endpoint `POST /api/auth/login` dan validasi otorisasi header `X-User-Email` serta `X-User-Role`.
-3. **[src/App.tsx](file:///C:/Users/USER/.gemini/antigravity/scratch/JohanesXS-AI-Assisted-Campus-Service/src/App.tsx)**: Membuat form login simulasi, penyimpanan session ke `localStorage`, tombol logout, dan tata letak panel dinamis berdasarkan role.
-4. **[src/App.css](file:///C:/Users/USER/.gemini/antigravity/scratch/JohanesXS-AI-Assisted-Campus-Service/src/App.css)**: Menambahkan class CSS premium untuk login card, form input, tabel, dan badge role.
-5. **[package.json](file:///C:/Users/USER/.gemini/antigravity/scratch/JohanesXS-AI-Assisted-Campus-Service/package.json)**: Memasang `vitest` sebagai devDependency dan menambahkan script `"test": "vitest run"`.
-6. **[tests/unit/auth-validation.test.ts](file:///C:/Users/USER/.gemini/antigravity/scratch/JohanesXS-AI-Assisted-Campus-Service/tests/unit/auth-validation.test.ts)**: Membuat test suite untuk memvalidasi format email kampus.
+## Penggunaan AI
+* **Skill yang digunakan:** `10-implementation`
+* **Kesalahan AI yang ditemukan:** Mencoba menulis file non-artifact menggunakan metadata artifact (mengakibatkan error path), serta mencoba mengeksekusi skrip npm lewat PowerShell saat Execution Policy dinonaktifkan.
+* **Perbaikan manusia:** Mengarahkan penulisan file `09-github-issues.md` ke folder yang benar (`docs/planning/`) dan mengarahkan eksekusi perintah terminal melalui `cmd.exe`.
 
-### Verification
-Pengujian unit dijalankan menggunakan perintah `npm test` dengan hasil sukses:
-```text
- RUN  v4.1.9 C:/Users/USER/.gemini/antigravity/scratch/JohanesXS-AI-Assisted-Campus-Service
-
- ✓ tests/unit/auth-validation.test.ts (4 tests) 13ms
-
- Test Files  1 passed (1)
-      Tests  4 passed (4)
-   Duration  1.17s
-```
-
----
-
-## AI Evidence & Human Review
-
-### Prompt/Invocation
-> "Mulai dan jangan lupa untuk mengecek apakah sudah sesuai dengan file instruksi dan referensi yang saya berikan"
-
-### Output AI
-- Membuat migrasi skema tabel D1 dan seeding data user.
-- Mengimplementasikan endpoint auth login dan pengecekan otorisasi header pada Worker.
-- Membangun UI Login form premium beserta validasi di sisi frontend.
-- Menyusun unit test untuk fungsi pengecekan email kampus.
-
-### Human Review
-*(Menunggu penilaian dan tanggapan dari pengguna)*
-
-### Hasil Final
-- **Status:** **DRAFT / IN-REVIEW**
-
----
-
-## Traceability Matrix
-
-| Requirement ID | Deskripsi Requirement | File Kode / Modul | File Test Terkait |
-| :--- | :--- | :--- | :--- |
-| **FR-001** | Mengizinkan login dengan akun kampus | `src/App.tsx`, `worker/index.ts` | `tests/unit/auth-validation.test.ts` |
-| **NFR-001** | Batasi pembuatan/pemantauan hanya untuk user login | `src/App.tsx`, `worker/index.ts` | `tests/unit/auth-validation.test.ts` |
-| **NFR-003** | Pembagian hak akses berbasis role | `src/App.tsx`, `worker/index.ts` | - |
+## Reviewer
+* **Nama:** JohanesXD
+* **Keputusan:** *(Menunggu review dan merge)*
