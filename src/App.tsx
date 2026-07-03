@@ -340,7 +340,7 @@ export default function App() {
 
       
 
-      const result = await response.json();
+      const result = await response.json() as { data?: ServiceRequest[] };
 
       setRequests(result.data ?? []);
 
