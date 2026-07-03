@@ -12,6 +12,7 @@ type ServiceRequest = {
   status: string;
   urgency: string;
   rejection_reason?: string;
+  technician_name?: string;
 };
 
 type UserSession = {
@@ -64,6 +65,10 @@ export default function App() {
   const [adminError, setAdminError] = useState("");
   const [adminSuccess, setAdminSuccess] = useState("");
 
+  // Technician Assignment States
+  const [techniciansList, setTechniciansList] = useState<{ id: string; name: string; campus_email: string }[]>([]);
+  const [selectedTechnicianId, setSelectedTechnicianId] = useState("");
+
   // Load session from localStorage on mount
   useEffect(() => {
     const savedSession = localStorage.getItem("campus_session");
@@ -79,11 +84,14 @@ export default function App() {
   // Load requests and metadata on login
   useEffect(() => {
     if (user) {
-      if (["REPORTER", "ADMIN"].includes(user.role)) {
+      if (["REPORTER", "ADMIN", "TECHNICIAN"].includes(user.role)) {
         loadRequests();
       }
       if (user.role === "REPORTER") {
         loadMetadata();
+      }
+      if (user.role === "ADMIN") {
+        loadTechnicians();
       }
     }
   }, [user]);
@@ -224,6 +232,63 @@ export default function App() {
     setRejectionReasonInput("");
     setAdminError("");
     setAdminSuccess("");
+    setTechniciansList([]);
+    setSelectedTechnicianId("");
+  }
+
+  async function loadTechnicians() {
+    if (!user) return;
+    try {
+      const response = await fetch("/api/technicians", {
+        headers: {
+          "X-User-Email": user.campus_email,
+          "X-User-Role": user.role
+        }
+      });
+      const result = await response.json();
+      const techs = result.data ?? [];
+      setTechniciansList(techs);
+      if (techs.length > 0) {
+        setSelectedTechnicianId(techs[0].id);
+      }
+    } catch (e) {
+      console.error("Gagal memuat teknisi", e);
+    }
+  }
+
+  async function handleAssign(requestId: string) {
+    setAdminError("");
+    setAdminSuccess("");
+
+    if (!selectedTechnicianId) {
+      setAdminError("Silakan pilih teknisi.");
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/requests/${requestId}/assign`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-User-Email": user?.campus_email ?? "",
+          "X-User-Role": user?.role ?? ""
+        },
+        body: JSON.stringify({ technician_id: selectedTechnicianId })
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        setAdminError(result.error ?? "Gagal menugaskan teknisi.");
+        return;
+      }
+
+      setAdminSuccess("Teknisi berhasil ditugaskan.");
+      setSelectedRequest(null);
+      await loadRequests();
+    } catch (e) {
+      setAdminError("Koneksi bermasalah. Gagal mengirim penugasan.");
+    }
   }
 
   async function handleReject(requestId: string) {
@@ -611,49 +676,64 @@ export default function App() {
                     </div>
                   </div>
 
-                  {selectedRequest.status === "REJECTED" && (
-                    <div style={{ marginBottom: 20, padding: 12, background: "rgba(239, 68, 68, 0.05)", border: "1px solid rgba(239, 68, 68, 0.2)", borderRadius: 6 }}>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: "#ef4444" }}>ALASAN PENOLAKAN</div>
-                      <div style={{ color: "var(--text-h)", fontSize: 14, marginTop: 4 }}>{selectedRequest.rejection_reason}</div>
+                  {selectedRequest.status === "ASSIGNED" && (
+                    <div style={{ marginBottom: 20, padding: 12, background: "rgba(16, 185, 129, 0.05)", border: "1px solid rgba(16, 185, 129, 0.2)", borderRadius: 6 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: "#10b981" }}>TEKNISI PENANGGUNG JAWAB</div>
+                      <div style={{ color: "var(--text-h)", fontSize: 15, marginTop: 4, fontWeight: 600 }}>{selectedRequest.technician_name || "Sedang ditugaskan"}</div>
                     </div>
                   )}
 
-                  {selectedRequest.status !== "REJECTED" ? (
-                    <div>
+                  {["SUBMITTED", "UNDER_REVIEW"].includes(selectedRequest.status) && (
+                    <div style={{ borderTop: "1px solid var(--border)", paddingTop: 20, marginTop: 20 }}>
                       <div className="form-group">
+                        <label style={{ fontSize: 12 }}>Pilih Teknisi untuk Ditugaskan</label>
+                        <select
+                          value={selectedTechnicianId}
+                          onChange={(e) => setSelectedTechnicianId(e.target.value)}
+                          className="form-select"
+                          style={{ fontSize: 14 }}
+                        >
+                          {techniciansList.map(t => (
+                            <option key={t.id} value={t.id}>{t.name} ({t.campus_email})</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <button 
+                        onClick={() => handleAssign(selectedRequest.id)}
+                        className="btn-primary"
+                        style={{ fontSize: 14, marginBottom: 20 }}
+                      >
+                        Setujui & Tugaskan Teknisi
+                      </button>
+
+                      <div className="form-group" style={{ borderTop: "1px solid var(--border)", paddingTop: 20 }}>
                         <label style={{ fontSize: 12 }}>Alasan Penolakan (Wajib jika menolak)</label>
                         <textarea
                           placeholder="Tulis alasan mengapa laporan ini tidak valid..."
                           value={rejectionReasonInput}
                           onChange={(e) => setRejectionReasonInput(e.target.value)}
-                          rows={3}
+                          rows={2}
                           className="form-textarea"
                           style={{ fontSize: 14 }}
                         />
                       </div>
                       
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                        <button 
-                          onClick={() => handleReject(selectedRequest.id)}
-                          className="btn-logout"
-                          style={{ borderColor: "#ef4444", color: "#ef4444", fontWeight: 600 }}
-                        >
-                          Tolak Laporan
-                        </button>
-                        <button 
-                          className="btn-primary"
-                          disabled
-                          style={{ opacity: 0.5, cursor: "not-allowed", fontSize: 14 }}
-                        >
-                          Tugaskan (Issue 4)
-                        </button>
-                      </div>
+                      <button 
+                        onClick={() => handleReject(selectedRequest.id)}
+                        className="btn-logout"
+                        style={{ borderColor: "#ef4444", color: "#ef4444", fontWeight: 600, width: "100%" }}
+                      >
+                        Tolak Laporan
+                      </button>
                     </div>
-                  ) : (
+                  )}
+
+                  {!["SUBMITTED", "UNDER_REVIEW"].includes(selectedRequest.status) && (
                     <button 
                       onClick={() => setSelectedRequest(null)}
                       className="btn-logout"
-                      style={{ width: "100%" }}
+                      style={{ width: "100%", marginTop: 10 }}
                     >
                       Tutup Peninjauan
                     </button>
@@ -670,11 +750,94 @@ export default function App() {
       {user.role === "TECHNICIAN" && (
         <main className="workspace-container">
           <h1>Layar Kerja Teknisi</h1>
-          <p>Pantau tugas perbaikan Anda, update progress, dan ubah status.</p>
+          <p style={{ marginBottom: 32 }}>Pantau tugas perbaikan Anda, update progress, dan ubah status.</p>
 
-          <div className="placeholder-view">
-            <h3 style={{ margin: "0 0 8px", color: "var(--text-h)" }}>Daftar Tugas Saya (Assigned Tasks)</h3>
-            <p>Fitur tugas teknisi dan pembaruan progress akan diimplementasikan pada tahap issue berikutnya.</p>
+          <div className="flex-container">
+            <div className="flex-main">
+              <h2>Daftar Tugas Saya</h2>
+              {requests.length === 0 ? (
+                <div className="placeholder-view">
+                  <p>Tidak ada tugas yang diberikan kepada Anda saat ini.</p>
+                </div>
+              ) : (
+                <table className="premium-table">
+                  <thead>
+                    <tr>
+                      <th>Nomor</th>
+                      <th>Judul</th>
+                      <th>Lokasi</th>
+                      <th>Kategori</th>
+                      <th>Urgensi</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {requests.map((item) => (
+                      <tr key={item.id} style={{ cursor: "pointer" }} onClick={() => setSelectedRequest(item)}>
+                        <td><code>{item.request_number}</code></td>
+                        <td style={{ fontWeight: 600 }}>{item.title}</td>
+                        <td style={{ fontSize: 13 }}>{item.location}</td>
+                        <td>{item.category}</td>
+                        <td>
+                          <span className="role-badge" style={{ fontSize: 11 }}>{item.urgency}</span>
+                        </td>
+                        <td>
+                          <span className={`status-indicator ${item.status.toLowerCase() === 'assigned' ? 'progress' : 'submitted'}`}>
+                            {item.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            <div className="flex-side">
+              <h2>Detail Penugasan</h2>
+              {selectedRequest ? (
+                <div className="premium-card" style={{ maxWidth: "100%", padding: 24, background: "var(--social-bg)" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+                    <code style={{ fontSize: 14 }}>{selectedRequest.request_number}</code>
+                    <span className="role-badge" style={{ fontSize: 11 }}>{selectedRequest.urgency}</span>
+                  </div>
+
+                  <h3 style={{ margin: "0 0 16px", color: "var(--text-h)", fontSize: 20 }}>{selectedRequest.title}</h3>
+                  
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", textTransform: "uppercase", letterSpacing: 0.5 }}>Lokasi</div>
+                    <div style={{ color: "var(--text-h)", fontSize: 15 }}>{selectedRequest.location}</div>
+                  </div>
+
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", textTransform: "uppercase", letterSpacing: 0.5 }}>Kategori</div>
+                    <div style={{ color: "var(--text-h)", fontSize: 15 }}>{selectedRequest.category}</div>
+                  </div>
+
+                  <div style={{ marginBottom: 20 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", textTransform: "uppercase", letterSpacing: 0.5 }}>Deskripsi</div>
+                    <div style={{ color: "var(--text-h)", fontSize: 14, background: "var(--bg)", padding: 12, borderRadius: 6, border: "1px solid var(--border)", whiteSpace: "pre-line" }}>
+                      {selectedRequest.description}
+                    </div>
+                  </div>
+
+                  <div style={{ marginBottom: 20 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", textTransform: "uppercase", letterSpacing: 0.5 }}>Status Tugas</div>
+                    <div style={{ color: "var(--text-h)", fontSize: 15, fontWeight: 600 }}>{selectedRequest.status}</div>
+                  </div>
+
+                  <button 
+                    onClick={() => setSelectedRequest(null)}
+                    className="btn-logout"
+                    style={{ width: "100%" }}
+                  >
+                    Tutup Detail
+                  </button>
+                </div>
+              ) : (
+                <p style={{ color: "var(--text)", marginTop: 16 }}>Pilih salah satu tugas di daftar untuk melihat detail pekerjaan.</p>
+              )}
+            </div>
           </div>
         </main>
       )}
