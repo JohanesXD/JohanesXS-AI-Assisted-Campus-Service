@@ -69,6 +69,13 @@ export default function App() {
   const [techniciansList, setTechniciansList] = useState<{ id: string; name: string; campus_email: string }[]>([]);
   const [selectedTechnicianId, setSelectedTechnicianId] = useState("");
 
+  // Technician Progress States
+  const [progressLogs, setProgressLogs] = useState<{ id: string; status: string; notes: string; created_at: string; technician_name: string }[]>([]);
+  const [progressStatusInput, setProgressStatusInput] = useState("IN_PROGRESS");
+  const [progressNotesInput, setProgressNotesInput] = useState("");
+  const [progressError, setProgressError] = useState("");
+  const [progressSuccess, setProgressSuccess] = useState("");
+
   // Load session from localStorage on mount
   useEffect(() => {
     const savedSession = localStorage.getItem("campus_session");
@@ -95,6 +102,15 @@ export default function App() {
       }
     }
   }, [user]);
+
+  // Load progress logs when request is selected
+  useEffect(() => {
+    if (selectedRequest) {
+      loadProgressLogs(selectedRequest.id);
+    } else {
+      setProgressLogs([]);
+    }
+  }, [selectedRequest]);
 
   async function loadMetadata() {
     if (!user) return;
@@ -234,6 +250,66 @@ export default function App() {
     setAdminSuccess("");
     setTechniciansList([]);
     setSelectedTechnicianId("");
+    setProgressLogs([]);
+    setProgressStatusInput("IN_PROGRESS");
+    setProgressNotesInput("");
+    setProgressError("");
+    setProgressSuccess("");
+  }
+
+  async function loadProgressLogs(requestId: string) {
+    if (!user) return;
+    try {
+      const response = await fetch(`/api/requests/${requestId}/progress`, {
+        headers: {
+          "X-User-Email": user.campus_email,
+          "X-User-Role": user.role
+        }
+      });
+      const result = await response.json();
+      setProgressLogs(result.data ?? []);
+    } catch (e) {
+      console.error("Gagal memuat log progress", e);
+    }
+  }
+
+  async function handleUpdateProgress(requestId: string) {
+    setProgressError("");
+    setProgressSuccess("");
+
+    if (!progressNotesInput.trim() || progressNotesInput.trim().length < 5) {
+      setProgressError("Catatan progress wajib diisi (minimal 5 karakter).");
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/requests/${requestId}/progress`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-User-Email": user?.campus_email ?? "",
+          "X-User-Role": user?.role ?? ""
+        },
+        body: JSON.stringify({
+          status: progressStatusInput,
+          notes: progressNotesInput.trim()
+        })
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        setProgressError(result.error ?? "Gagal memperbarui progress.");
+        return;
+      }
+
+      setProgressSuccess("Progress perbaikan berhasil diperbarui.");
+      setProgressNotesInput("");
+      await loadRequests();
+      await loadProgressLogs(requestId);
+    } catch (e) {
+      setProgressError("Koneksi bermasalah. Gagal memperbarui progress.");
+    }
   }
 
   async function loadTechnicians() {
@@ -570,7 +646,7 @@ export default function App() {
                   </thead>
                   <tbody>
                     {requests.map((item) => (
-                      <tr key={item.id}>
+                      <tr key={item.id} style={{ cursor: "pointer" }} onClick={() => setSelectedRequest(item)}>
                         <td><code>{item.request_number}</code></td>
                         <td>{item.title}</td>
                         <td style={{ fontSize: 13 }}>{item.location}</td>
@@ -590,6 +666,78 @@ export default function App() {
               )}
             </div>
           </div>
+
+          {selectedRequest && user.role === "REPORTER" && (
+            <div className="modal-overlay" onClick={() => setSelectedRequest(null)}>
+              <div className="modal-content premium-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 500, width: "100%", padding: 32 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+                  <code style={{ fontSize: 14 }}>{selectedRequest.request_number}</code>
+                  <span className="role-badge" style={{ fontSize: 11 }}>{selectedRequest.urgency}</span>
+                </div>
+                
+                <h3 style={{ margin: "0 0 16px", color: "var(--text-h)", fontSize: 22 }}>{selectedRequest.title}</h3>
+
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", textTransform: "uppercase" }}>Lokasi</div>
+                  <div style={{ color: "var(--text-h)", fontSize: 15 }}>{selectedRequest.location}</div>
+                </div>
+
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", textTransform: "uppercase" }}>Kategori</div>
+                  <div style={{ color: "var(--text-h)", fontSize: 15 }}>{selectedRequest.category}</div>
+                </div>
+
+                <div style={{ marginBottom: 20 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", textTransform: "uppercase" }}>Deskripsi</div>
+                  <div style={{ color: "var(--text-h)", fontSize: 14, background: "var(--bg)", padding: 12, borderRadius: 6, border: "1px solid var(--border)", whiteSpace: "pre-line" }}>
+                    {selectedRequest.description}
+                  </div>
+                </div>
+
+                {selectedRequest.status === "REJECTED" && (
+                  <div style={{ marginBottom: 20, padding: 12, background: "rgba(239, 68, 68, 0.05)", border: "1px solid rgba(239, 68, 68, 0.2)", borderRadius: 6 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: "#ef4444" }}>ALASAN PENOLAKAN</div>
+                    <div style={{ color: "var(--text-h)", fontSize: 14, marginTop: 4 }}>{selectedRequest.rejection_reason}</div>
+                  </div>
+                )}
+
+                {selectedRequest.status === "ASSIGNED" && (
+                  <div style={{ marginBottom: 20, padding: 12, background: "rgba(16, 185, 129, 0.05)", border: "1px solid rgba(16, 185, 129, 0.2)", borderRadius: 6 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: "#10b981" }}>TEKNISI PENANGGUNG JAWAB</div>
+                    <div style={{ color: "var(--text-h)", fontSize: 14, marginTop: 4, fontWeight: 600 }}>{selectedRequest.technician_name || "Sedang ditugaskan"}</div>
+                  </div>
+                )}
+
+                <div style={{ borderTop: "1px solid var(--border)", paddingTop: 20 }}>
+                  <h4 style={{ margin: "0 0 12px", color: "var(--text-h)" }}>Riwayat Perbaikan</h4>
+                  {progressLogs.length === 0 ? (
+                    <p style={{ fontSize: 13, color: "var(--text)" }}>Belum ada log perbaikan.</p>
+                  ) : (
+                    <div className="progress-timeline">
+                      {progressLogs.map(log => (
+                        <div key={log.id} className="progress-timeline-item">
+                          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                            <span style={{ fontWeight: 600, color: "var(--text-h)" }}>{log.status}</span>
+                            <span style={{ color: "var(--text)" }}>{new Date(log.created_at).toLocaleString("id-ID")}</span>
+                          </div>
+                          <p style={{ margin: "4px 0 0", fontSize: 13, color: "var(--text)" }}>{log.notes}</p>
+                          <span style={{ fontSize: 11, color: "var(--text)", opacity: 0.8 }}>Oleh: {log.technician_name}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <button 
+                  onClick={() => setSelectedRequest(null)}
+                  className="btn-logout"
+                  style={{ width: "100%", marginTop: 24 }}
+                >
+                  Tutup
+                </button>
+              </div>
+            </div>
+          )}
         </main>
       )}
 
@@ -729,11 +877,34 @@ export default function App() {
                     </div>
                   )}
 
+                  {/* Tampilkan Riwayat Progress Laporan untuk Admin */}
+                  {selectedRequest.status !== "REJECTED" && (
+                    <div style={{ borderTop: "1px solid var(--border)", paddingTop: 20, marginTop: 20 }}>
+                      <h4 style={{ margin: "0 0 12px", color: "var(--text-h)" }}>Riwayat Perbaikan</h4>
+                      {progressLogs.length === 0 ? (
+                        <p style={{ fontSize: 13, color: "var(--text)" }}>Belum ada log perbaikan.</p>
+                      ) : (
+                        <div className="progress-timeline">
+                          {progressLogs.map(log => (
+                            <div key={log.id} className="progress-timeline-item">
+                              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                                <span style={{ fontWeight: 600, color: "var(--text-h)" }}>{log.status}</span>
+                                <span style={{ color: "var(--text)" }}>{new Date(log.created_at).toLocaleString("id-ID")}</span>
+                              </div>
+                              <p style={{ margin: "4px 0 0", fontSize: 13, color: "var(--text)" }}>{log.notes}</p>
+                              <span style={{ fontSize: 11, color: "var(--text)", opacity: 0.8 }}>Oleh: {log.technician_name}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {!["SUBMITTED", "UNDER_REVIEW"].includes(selectedRequest.status) && (
                     <button 
                       onClick={() => setSelectedRequest(null)}
                       className="btn-logout"
-                      style={{ width: "100%", marginTop: 10 }}
+                      style={{ width: "100%", marginTop: 20 }}
                     >
                       Tutup Peninjauan
                     </button>
@@ -826,10 +997,70 @@ export default function App() {
                     <div style={{ color: "var(--text-h)", fontSize: 15, fontWeight: 600 }}>{selectedRequest.status}</div>
                   </div>
 
+                  {progressSuccess && <div className="alert-success" style={{ fontSize: 13, padding: 8 }}>{progressSuccess}</div>}
+                  {progressError && <div className="alert-error" style={{ fontSize: 13, padding: 8 }}>{progressError}</div>}
+
+                  <div style={{ borderTop: "1px solid var(--border)", paddingTop: 20, marginTop: 20 }}>
+                    <h4 style={{ margin: "0 0 16px", color: "var(--text-h)" }}>Update Progress Perbaikan</h4>
+                    
+                    <div className="form-group">
+                      <label style={{ fontSize: 12 }}>Status Baru</label>
+                      <select
+                        value={progressStatusInput}
+                        onChange={(e) => setProgressStatusInput(e.target.value)}
+                        className="form-select"
+                        style={{ fontSize: 14 }}
+                      >
+                        <option value="IN_PROGRESS">In Progress</option>
+                        <option value="ON_HOLD">On Hold</option>
+                        <option value="RESOLVED">Resolved</option>
+                      </select>
+                    </div>
+
+                    <div className="form-group">
+                      <label style={{ fontSize: 12 }}>Catatan Progress (min 5 karakter)</label>
+                      <textarea
+                        placeholder="Tulis apa saja yang telah dikerjakan atau kendala yang dihadapi..."
+                        value={progressNotesInput}
+                        onChange={(e) => setProgressNotesInput(e.target.value)}
+                        rows={2}
+                        className="form-textarea"
+                        style={{ fontSize: 14 }}
+                      />
+                    </div>
+
+                    <button
+                      onClick={() => handleUpdateProgress(selectedRequest.id)}
+                      className="btn-primary"
+                      style={{ fontSize: 14, width: "100%", marginBottom: 20 }}
+                    >
+                      Update Progress
+                    </button>
+                  </div>
+
+                  <div style={{ borderTop: "1px solid var(--border)", paddingTop: 20 }}>
+                    <h4 style={{ margin: "0 0 12px", color: "var(--text-h)" }}>Riwayat Progress</h4>
+                    {progressLogs.length === 0 ? (
+                      <p style={{ fontSize: 13, color: "var(--text)" }}>Belum ada log progress.</p>
+                    ) : (
+                      <div className="progress-timeline">
+                        {progressLogs.map(log => (
+                          <div key={log.id} className="progress-timeline-item">
+                            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                              <span style={{ fontWeight: 600, color: "var(--text-h)" }}>{log.status}</span>
+                              <span style={{ color: "var(--text)" }}>{new Date(log.created_at).toLocaleString("id-ID")}</span>
+                            </div>
+                            <p style={{ margin: "4px 0 0", fontSize: 13, color: "var(--text)" }}>{log.notes}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
                   <button 
                     onClick={() => setSelectedRequest(null)}
                     className="btn-logout"
-                    style={{ width: "100%" }}
+                    style={{ width: "100%", marginTop: 24 }}
                   >
                     Tutup Detail
                   </button>
