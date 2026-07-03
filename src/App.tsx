@@ -33,6 +33,12 @@ type Room = {
   room_name: string;
 };
 
+type Technician = {
+  id: string;
+  campus_email: string;
+  name: string;
+};
+
 export default function App() {
   const [user, setUser] = useState<UserSession | null>(null);
   
@@ -44,6 +50,7 @@ export default function App() {
   // Metadata Lists
   const [categoriesList, setCategoriesList] = useState<Category[]>([]);
   const [roomsList, setRoomsList] = useState<Room[]>([]);
+  const [techniciansList, setTechniciansList] = useState<Technician[]>([]);
 
   // Request Form & List States
   const [requests, setRequests] = useState<ServiceRequest[]>([]);
@@ -63,6 +70,11 @@ export default function App() {
   const [rejectionReasonInput, setRejectionReasonInput] = useState("");
   const [adminError, setAdminError] = useState("");
   const [adminSuccess, setAdminSuccess] = useState("");
+
+  // Additional Technician Assignment States
+  const [showAddTechnicianForm, setShowAddTechnicianForm] = useState(false);
+  const [selectedTechnicianId, setSelectedTechnicianId] = useState("");
+  const [additionalTechnicianReason, setAdditionalTechnicianReason] = useState("");
 
   // Load session from localStorage on mount
   useEffect(() => {
@@ -84,6 +96,9 @@ export default function App() {
       }
       if (user.role === "REPORTER") {
         loadMetadata();
+      }
+      if (user.role === "ADMIN") {
+        loadTechnicians();
       }
     }
   }, [user]);
@@ -133,6 +148,23 @@ export default function App() {
       }
     } catch (e) {
       console.error("Gagal memuat data master", e);
+    }
+  }
+
+  async function loadTechnicians() {
+    if (!user) return;
+    try {
+      const techResponse = await fetch("/api/users/technicians", {
+        headers: {
+          "X-User-Email": user.campus_email,
+          "X-User-Role": user.role
+        }
+      });
+      const techResult = await techResponse.json();
+      const techs = techResult.data ?? [];
+      setTechniciansList(techs);
+    } catch (e) {
+      console.error("Gagal memuat daftar teknisi", e);
     }
   }
 
@@ -220,10 +252,14 @@ export default function App() {
     setLoginError("");
     setCategoriesList([]);
     setRoomsList([]);
+    setTechniciansList([]);
     setSelectedRequest(null);
     setRejectionReasonInput("");
     setAdminError("");
     setAdminSuccess("");
+    setShowAddTechnicianForm(false);
+    setSelectedTechnicianId("");
+    setAdditionalTechnicianReason("");
   }
 
   async function handleReject(requestId: string) {
@@ -259,6 +295,46 @@ export default function App() {
       await loadRequests();
     } catch (e) {
       setAdminError("Koneksi bermasalah. Gagal mengirim penolakan.");
+    }
+  }
+
+  async function handleAssignAdditionalTechnician(requestId: string) {
+    setAdminError("");
+    setAdminSuccess("");
+
+    if (!selectedTechnicianId) {
+      setAdminError("Teknisi wajib dipilih.");
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/requests/${requestId}/assign-additional`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-User-Email": user?.campus_email ?? "",
+          "X-User-Role": user?.role ?? ""
+        },
+        body: JSON.stringify({
+          technician_id: selectedTechnicianId,
+          reason: additionalTechnicianReason
+        })
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        setAdminError(result.error ?? "Gagal menambahkan teknisi tambahan.");
+        return;
+      }
+
+      setAdminSuccess("Teknisi tambahan berhasil ditugaskan.");
+      setShowAddTechnicianForm(false);
+      setSelectedTechnicianId("");
+      setAdditionalTechnicianReason("");
+      await loadRequests();
+    } catch (e) {
+      setAdminError("Koneksi bermasalah. Gagal menambahkan teknisi.");
     }
   }
 
@@ -648,6 +724,71 @@ export default function App() {
                           Tugaskan (Issue 4)
                         </button>
                       </div>
+
+                      {selectedRequest.status === "NEED_HELP" && (
+                        <div style={{ marginTop: 20, padding: 16, background: "rgba(59, 130, 246, 0.05)", border: "1px solid rgba(59, 130, 246, 0.2)", borderRadius: 6 }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: "#3b82f6", marginBottom: 8 }}>
+                            TEKNISI MEMBUTUHKAN BANTUAN
+                          </div>
+                          {!showAddTechnicianForm ? (
+                            <button
+                              onClick={() => setShowAddTechnicianForm(true)}
+                              className="btn-primary"
+                              style={{ fontSize: 13 }}
+                            >
+                              + Tambah Teknisi Tambahan
+                            </button>
+                          ) : (
+                            <div>
+                              <div className="form-group">
+                                <label style={{ fontSize: 12 }}>Pilih Teknisi</label>
+                                <select
+                                  value={selectedTechnicianId}
+                                  onChange={(e) => setSelectedTechnicianId(e.target.value)}
+                                  className="form-select"
+                                  style={{ fontSize: 14 }}
+                                >
+                                  <option value="">-- Pilih Teknisi --</option>
+                                  {techniciansList.map(t => (
+                                    <option key={t.id} value={t.id}>{t.name} ({t.campus_email})</option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div className="form-group">
+                                <label style={{ fontSize: 12 }}>Alasan Penugasan (Opsional)</label>
+                                <textarea
+                                  placeholder="Jelaskan mengapa teknisi ini dibutuhkan..."
+                                  value={additionalTechnicianReason}
+                                  onChange={(e) => setAdditionalTechnicianReason(e.target.value)}
+                                  rows={2}
+                                  className="form-textarea"
+                                  style={{ fontSize: 14 }}
+                                />
+                              </div>
+                              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                                <button
+                                  onClick={() => handleAssignAdditionalTechnician(selectedRequest.id)}
+                                  className="btn-primary"
+                                  style={{ fontSize: 13 }}
+                                >
+                                  Tugaskan
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setShowAddTechnicianForm(false);
+                                    setSelectedTechnicianId("");
+                                    setAdditionalTechnicianReason("");
+                                  }}
+                                  className="btn-logout"
+                                  style={{ fontSize: 13 }}
+                                >
+                                  Batal
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <button 
