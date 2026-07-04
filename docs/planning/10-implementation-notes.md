@@ -1,25 +1,25 @@
-# 10 Implementation Notes: FR-038/039/040 - Manajemen Laporan Lanjutan oleh Administrator
+# 10 Implementation Notes: FR-024/025/026/027/028/029/042/043 - Dashboard dan Pelaporan untuk Manajer Fasilitas
 
 ## Issue
-Closes #12
+Closes #13
 
 ## Requirement
-- **FR:** FR-038 (Administrator mengedit kategori, lokasi, atau deskripsi sebelum menugaskan), FR-039 (Administrator menggabungkan laporan duplikat), FR-040 (Administrator mengganti teknisi setelah laporan berjalan dengan persetujuan).
-- **AC:** AC-024 (Admin menggabungkan laporan duplikat ke laporan utama), AC-025 (Persetujuan ganda teknisi lama & baru sebelum reassign aktif).
+- **FR:** FR-024 (Dashboard Manajer Fasilitas), FR-025 (Menampilkan total masalah diselesaikan), FR-026 (Menampilkan chart kategori terpopuler), FR-027 (Filter dan sorting dashboard), FR-028 (Laporan ringkas), FR-029 (Laporan ringkas berisi ruangan dan kategori), FR-042 (Unduh format CSV), FR-043 (Memberi catatan tindak lanjut dengan alasan wajib).
+- **AC:** AC-026 (Filter dashboard analitis dan ekspor data ke file CSV), AC-027 (Penambahan catatan tindak lanjut dengan alasan wajib minimal 5 karakter).
 
 ## Perubahan
-1. **Database Migration (`database/migrations/0012_admin_management.sql`)**: Menambahkan kolom `duplicate_of_id` pada tabel `service_requests`.
+1. **Database Migration (`database/migrations/0012_admin_management.sql`)**: Membuat tabel `facility_manager_notes` untuk mencatat evaluasi tindak lanjut beserta alasannya.
 2. **Worker API (`worker/index.ts`)**:
-   - PATCH `/api/admin/requests/:id/edit` untuk edit detail laporan oleh admin dengan alasan wajib.
-   - POST `/api/admin/requests/:id/merge` untuk merge laporan duplikat ke laporan utama.
-   - POST `/api/admin/requests/:id/reassign` untuk mengajukan penggantian teknisi.
-   - POST `/api/requests/:id/reassign/approve` untuk mencatat persetujuan teknisi lama/baru.
+   - GET `/api/reports/stats` untuk total masalah selesai dan chart kategori.
+   - GET `/api/reports/summary` untuk daftar laporan ringkas terfilter.
+   - GET `/api/reports/summary.csv` untuk mengunduh laporan ringkas dalam format CSV.
+   - POST `/api/reports/:id/follow-up` untuk mencatat tindak lanjut Manajer Fasilitas.
 3. **Frontend UI (`src/App.tsx`)**:
-   - Sistem tab "Antrean Review" dan "Semua Laporan" pada workspace Admin.
-   - Form edit admin, dialog merge, dan dropdown reassign teknisi pada detail peninjauan.
-   - Panel persetujuan reassignment (menyetujui/menolak) pada workspace tugas Teknisi.
-4. **Testing (`tests/unit/admin-advanced.test.ts`)**:
-   - Membuat 5 test case baru untuk validasi edit, penggabungan duplikat, reassign, dan persetujuan ganda teknisi.
+   - Sistem tab navigasi manajer "Statistik & Laporan" dan "Kelola Ruangan".
+   - Widget metrik dan diagram batang progress bar distribusi kategori masalah.
+   - Kontrol filter dan pencarian laporan ringkas, tombol export CSV, dan modal Catatan Tindak Lanjut.
+4. **Testing (`tests/unit/facility-manager.test.ts`)**:
+   - Membuat 5 test case baru untuk validasi stats, filter summary, ekspor CSV, dan validasi alasan catatan tindak lanjut.
 
 ## Test
 * [x] Test dijalankan
