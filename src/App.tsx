@@ -1,1139 +1,1621 @@
-interface Env {
-  DB: D1Database;
-}
-
-function json(data: unknown, status = 200) {
-  return Response.json(data, { status });
-}
-
-// Helper to validate campus email format
-function isValidCampusEmail(email: string): boolean {
-  const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
-  if (!emailRegex.test(email)) {
-    return false;
-  }
-  return email.endsWith(".ac.id") || email.endsWith("campus.ac.id");
-}
-
-async function recordStatusHistory(
-  env: Env,
-  requestId: string,
-  fromStatus: string | null,
-  toStatus: string,
-  changedByUserId: string | null,
-  reason: string | null
-): Promise<void> {
-  const id = crypto.randomUUID();
-  await env.DB.prepare(`
-    INSERT INTO request_status_history (id, request_id, from_status, to_status, changed_by_user_id, reason)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).bind(id, requestId, fromStatus, toStatus, changedByUserId, reason).run();
-}
-
-async function createNotification(
-  env: Env,
-  userId: string,
-  type: string,
-  title: string,
-  message: string,
-  requestId: string | null
-): Promise<void> {
-  const id = crypto.randomUUID();
-  await env.DB.prepare(`
-    INSERT INTO notifications (id, user_id, type, title, message, request_id)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).bind(id, userId, type, title, message, requestId).run();
-}
-
-// Determine who should be notified for a given status change
-async function notifyStatusChange(
-  env: Env,
-  requestId: string,
-  newStatus: string,
-  changedByUserId: string | null
-): Promise<void> {
-  // Get request info (reporter_id, assigned technicians)
-  const requestInfo = await env.DB.prepare(`
-    SELECT sr.reporter_id, sr.title,
-           u.campus_email AS reporter_email
-    FROM service_requests sr
-    JOIN users u ON sr.reporter_id = u.id
-    WHERE sr.id = ?
-  `).bind(requestId).first<{ reporter_id: string; title: string; reporter_email: string }>();
-
-  if (!requestInfo) return;
-
-  const requestTitle = requestInfo.title.length > 80
-    ? requestInfo.title.substring(0, 77) + "..."
-    : requestInfo.title;
-
-  // Get assigned admin users
-  const admins = await env.DB.prepare(`
-    SELECT id FROM users WHERE role = 'ADMIN' AND is_active = 1
-  `).all<{ id: string }>();
-
-  // Get assigned technicians
-  const technicians = await env.DB.prepare(`
-    SELECT technician_id FROM request_assignments
-    WHERE request_id = ? AND status = 'ACTIVE'
-  `).all<{ technician_id: string }>();
-
-  const reporterId = requestInfo.reporter_id;
-
-  switch (newStatus) {
-    case "SUBMITTED":
-      for (const a of admins.results) {
-        await createNotification(env, a.id, "STATUS_CHANGE",
-          "Laporan Baru Masuk",
-          `Laporan baru "${requestTitle}" menunggu pemeriksaan.`,
-          requestId);
-      }
-      break;
-
-    case "REJECTED":
-      await createNotification(env, reporterId, "STATUS_CHANGE",
-        "Laporan Ditolak",
-        `Laporan "${requestTitle}" telah ditolak oleh administrator.`,
-        requestId);
-      break;
-
-    case "ASSIGNED":
-      for (const t of technicians.results) {
-        if (t.technician_id !== changedByUserId) {
-          await createNotification(env, t.technician_id, "STATUS_CHANGE",
-            "Tugas Baru",
-            `Anda ditugaskan untuk menangani laporan "${requestTitle}".`,
-            requestId);
-        }
-      }
-      break;
-
-    case "IN_PROGRESS":
-      await createNotification(env, reporterId, "STATUS_CHANGE",
-        "Pekerjaan Dimulai",
-        `Laporan "${requestTitle}" sedang dikerjakan oleh teknisi.`,
-        requestId);
-      break;
-
-    case "NEED_HELP":
-      for (const a of admins.results) {
-        await createNotification(env, a.id, "NEED_HELP",
-          "Teknisi Butuh Bantuan",
-          `Teknisi membutuhkan bantuan untuk laporan "${requestTitle}".`,
-          requestId);
-      }
-      break;
-
-    case "WAITING_PARTS":
-      await createNotification(env, reporterId, "WAITING_PARTS",
-        "Menunggu Suku Cadang",
-        `Laporan "${requestTitle}" menunggu suku cadang baru.`,
-        requestId);
-      break;
-
-    case "PAUSED":
-      await createNotification(env, reporterId, "PAUSED",
-        "Pekerjaan Tertunda",
-        `Pekerjaan pada laporan "${requestTitle}" untuk sementara tertunda.`,
-        requestId);
-      break;
-
-    case "WAITING_REPORTER_CONFIRMATION":
-      await createNotification(env, reporterId, "RESOLVED",
-        "Pekerjaan Selesai - Konfirmasi Diperlukan",
-        `Laporan "${requestTitle}" telah selesai dikerjakan. Silakan konfirmasi dalam 45 menit.`,
-        requestId);
-      break;
-
-    case "CLOSED_REPORTER_CONFIRMED":
-      for (const a of admins.results) {
-        await createNotification(env, a.id, "STATUS_CHANGE",
-          "Laporan Ditutup (Konfirmasi Pelapor)",
-          `Laporan "${requestTitle}" telah dikonfirmasi selesai oleh pelapor.`,
-          requestId);
-      }
-      break;
-
-    case "CLOSED_AUTO":
-      await createNotification(env, reporterId, "STATUS_CHANGE",
-        "Laporan Ditutup Otomatis",
-        `Laporan "${requestTitle}" ditutup otomatis karena batas waktu konfirmasi telah habis.`,
-        requestId);
-      break;
-
-    case "CLOSED_ADMIN":
-      await createNotification(env, reporterId, "STATUS_CHANGE",
-        "Laporan Ditutup oleh Admin",
-        `Laporan "${requestTitle}" telah ditutup oleh administrator.`,
-        requestId);
-      break;
-
-    case "REOPEN_REQUESTED":
-      for (const a of admins.results) {
-        await createNotification(env, a.id, "STATUS_CHANGE",
-          "Pelapor Menolak Hasil",
-          `Pelapor menolak hasil pekerjaan untuk laporan "${requestTitle}". Menunggu tindakan admin.`,
-          requestId);
-      }
-      break;
-
-    case "REOPENED":
-      await createNotification(env, reporterId, "REOPENED",
-        "Laporan Dibuka Ulang",
-        `Laporan "${requestTitle}" telah dibuka ulang oleh administrator.`,
-        requestId);
-      for (const t of technicians.results) {
-        await createNotification(env, t.technician_id, "STATUS_CHANGE",
-          "Laporan Dibuka Ulang",
-          `Laporan "${requestTitle}" telah dibuka ulang dan perlu ditindaklanjuti.`,
-          requestId);
-      }
-      break;
-
-    case "EDITED":
-      // FR-032: Notify admins when reporter edits a request
-      for (const a of admins.results) {
-        await createNotification(env, a.id, "STATUS_CHANGE",
-          "Laporan Diubah Pelapor",
-          `Laporan "${requestTitle}" telah diubah oleh pelapor dan perlu ditinjau ulang.`,
-          requestId);
-      }
-      break;
-
-    case "CANCELLED":
-      // FR-034: Pelapor membatalkan laporan → notifikasi admin
-      for (const a of admins.results) {
-        await createNotification(env, a.id, "STATUS_CHANGE",
-          "Laporan Dibatalkan Pelapor",
-          `Laporan "${requestTitle}" telah dibatalkan oleh pelapor.`,
-          requestId);
-      }
-      break;
-  }
-}
-
-async function runAutoClose(env: Env): Promise<void> {
-  const expired = await env.DB.prepare(`
-    SELECT id FROM service_requests
-    WHERE status = 'WAITING_REPORTER_CONFIRMATION'
-    AND confirmation_due_at IS NOT NULL
-    AND datetime(confirmation_due_at) <= datetime('now')
-  `).all<{ id: string }>();
-
-  for (const req of expired.results) {
-    await env.DB.prepare(`
-      UPDATE service_requests
-      SET status = 'CLOSED_AUTO', closed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `).bind(req.id).run();
-    await recordStatusHistory(env, req.id, "WAITING_REPORTER_CONFIRMATION", "CLOSED_AUTO", null, "Batas waktu 45 menit konfirmasi telah habis");
-    await notifyStatusChange(env, req.id, "CLOSED_AUTO", null);
-  }
-}
-
-export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
-    const url = new URL(request.url);
-
-    // Endpoint Health Check (tidak memerlukan auth)
-    if (url.pathname === "/api/health" && request.method === "GET") {
-      return json({ status: "ok" });
-    }
-
-    // Endpoint Login (tidak memerlukan auth)
-    if (url.pathname === "/api/auth/login" && request.method === "POST") {
-      const input = await request.json() as {
-        email?: string;
-        role?: string;
-      };
-
-      if (!input.email || !input.role) {
-        return json({ error: "Email kampus dan role wajib diisi." }, 422);
-      }
-
-      const email = input.email.trim();
-      const role = input.role.trim();
-
-      if (!isValidCampusEmail(email)) {
-        return json({ error: "Format email kampus tidak valid (harus *.ac.id)." }, 422);
-      }
-
-      if (!["REPORTER", "ADMIN", "TECHNICIAN", "FACILITY_MANAGER"].includes(role)) {
-        return json({ error: "Role tidak valid." }, 422);
-      }
-
-      // Cari user di database D1
-      const existingUser = await env.DB.prepare(`
-        SELECT id, campus_email, name, role FROM users WHERE campus_email = ?
-      `).bind(email).first<{ id: string; campus_email: string; name: string; role: string }>();
-
-      if (existingUser) {
-        return json({ user: existingUser }, 200);
-      }
-
-      // Jika user tidak ditemukan, daftarkan otomatis
-      const id = `usr-${crypto.randomUUID()}`;
-      const prefix = email.split("@")[0];
-      const name = prefix
-        .replace(/[._-]/g, " ")
-        .split(" ")
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(" ");
-
-      await env.DB.prepare(`
-        INSERT INTO users (id, campus_email, name, role)
-        VALUES (?, ?, ?, ?)
-      `).bind(id, email, name, role).run();
-
-      return json({
-        user: { id, campus_email: email, name, role }
-      }, 201);
-    }
-
-    // Otorisasi Global untuk Endpoint yang Membutuhkan Login
-    const userEmail = request.headers.get("X-User-Email");
-    const userRole = request.headers.get("X-User-Role");
-
-    if (!userEmail || !userRole) {
-      return json({ error: "Unauthorized. Silakan login terlebih dahulu." }, 401);
-    }
-
-    // Ambil data User dari DB berdasarkan email
-    const currentUser = await env.DB.prepare(`
-      SELECT id, campus_email, name, role FROM users WHERE campus_email = ?
-    `).bind(userEmail).first<{ id: string; campus_email: string; name: string; role: string }>();
-
-    if (!currentUser) {
-      return json({ error: "Sesi pengguna tidak valid. Silakan login kembali." }, 401);
-    }
-
-    await runAutoClose(env);
-
-    // Endpoint GET /api/categories
-    if (url.pathname === "/api/categories" && request.method === "GET") {
-      const result = await env.DB.prepare(`
-        SELECT id, name FROM categories WHERE is_active = 1 ORDER BY name ASC
-      `).all();
-      return json({ data: result.results });
-    }
-
-    // Endpoint GET /api/rooms
-    if (url.pathname === "/api/rooms" && request.method === "GET") {
-      const result = await env.DB.prepare(`
-        SELECT id, building, floor, room_name FROM rooms WHERE is_active = 1 ORDER BY building ASC, floor ASC, room_name ASC
-      `).all();
-      return json({ data: result.results });
-    }
-
-    // Endpoint GET /api/users/technicians
-    if (url.pathname === "/api/users/technicians" && request.method === "GET") {
-      if (currentUser.role !== "ADMIN") {
-        return json({ error: "Hanya administrator (ADMIN) yang dapat melihat daftar teknisi." }, 403);
-      }
-
-      const result = await env.DB.prepare(`
-        SELECT id, campus_email, name FROM users WHERE role = 'TECHNICIAN' AND is_active = 1 ORDER BY name ASC
-      `).all();
-      return json({ data: result.results });
-    }
-
-    // Endpoint POST /api/requests/:id/reject
-    const rejectMatch = url.pathname.match(/^\/api\/requests\/([a-zA-Z0-9-]+)\/reject$/);
-    if (rejectMatch && request.method === "POST") {
-      if (currentUser.role !== "ADMIN") {
-        return json({ error: "Hanya administrator (ADMIN) yang dapat menolak laporan." }, 403);
-      }
-
-      const requestId = rejectMatch[1];
-      const input = await request.json() as { reason?: string };
-
-      if (!input.reason || input.reason.trim().length < 5) {
-        return json({ error: "Alasan penolakan wajib diisi (minimal 5 karakter)." }, 422);
-      }
-
-      // Pastikan laporan ada
-      const checkRequest = await env.DB.prepare(`
-        SELECT id, status FROM service_requests WHERE id = ?
-      `).bind(requestId).first<{ id: string; status: string }>();
-
-      if (!checkRequest) {
-        return json({ error: "Laporan tidak ditemukan." }, 404);
-      }
-
-      await env.DB.prepare(`
-        UPDATE service_requests
-        SET status = 'REJECTED', rejection_reason = ?, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `).bind(input.reason.trim(), requestId).run();
-
-      await recordStatusHistory(env, requestId, checkRequest.status, "REJECTED", currentUser.id, input.reason.trim());
-      await notifyStatusChange(env, requestId, "REJECTED", currentUser.id);
-
-      return json({ success: true, status: "REJECTED" }, 200);
-    }
-
-    // GET /api/requests/:id - detail laporan
-    const requestDetailMatch = url.pathname.match(/^\/api\/requests\/([a-zA-Z0-9-]+)$/);
-    if (requestDetailMatch && request.method === "GET") {
-      const requestId = requestDetailMatch[1];
-
-      const requestData = await env.DB.prepare(`
-        SELECT sr.id, sr.request_number, sr.title, sr.description, sr.status, sr.urgency,
-               sr.rejection_reason, sr.resolution_rejected_reason,
-               sr.resolved_at, sr.confirmation_due_at, sr.closed_at,
-               sr.created_at, sr.updated_at,
-               c.name AS category,
-               u.name AS reporter_name, u.campus_email AS reporter_email,
-               r.building || ' - ' || r.floor || ' - ' || r.room_name AS location
-        FROM service_requests sr
-        JOIN categories c ON sr.category_id = c.id
-        JOIN rooms r ON sr.room_id = r.id
-        JOIN users u ON sr.reporter_id = u.id
-        WHERE sr.id = ?
-      `).bind(requestId).first();
-
-      if (!requestData) {
-        return json({ error: "Laporan tidak ditemukan." }, 404);
-      }
-
-      if (currentUser.role === "REPORTER") {
-        const ownerEmail = await env.DB.prepare(`
-          SELECT campus_email FROM users WHERE id = (SELECT reporter_id FROM service_requests WHERE id = ?)
-        `).bind(requestId).first<string>("campus_email");
-
-        if (ownerEmail && ownerEmail !== currentUser.campus_email) {
-          return json({ error: "Anda hanya dapat melihat laporan milik sendiri." }, 403);
-        }
-      }
-
-      return json({ data: requestData }, 200);
-    }
-
-    // GET /api/requests/:id/status-history
-    const statusHistoryMatch = url.pathname.match(/^\/api\/requests\/([a-zA-Z0-9-]+)\/status-history$/);
-    if (statusHistoryMatch && request.method === "GET") {
-      const requestId = statusHistoryMatch[1];
-
-      const result = await env.DB.prepare(`
-        SELECT rsh.id, rsh.from_status, rsh.to_status, rsh.reason, rsh.created_at,
-               u.name AS changed_by_name, u.role AS changed_by_role
-        FROM request_status_history rsh
-        LEFT JOIN users u ON rsh.changed_by_user_id = u.id
-        WHERE rsh.request_id = ?
-        ORDER BY rsh.created_at ASC
-      `).bind(requestId).all();
-
-      return json({ data: result.results }, 200);
-    }
-
-    // Endpoint PATCH /api/requests/:id - Pelapor mengubah laporan (FR-031, FR-032, AC-023)
-    const requestEditMatch = url.pathname.match(/^\/api\/requests\/([a-zA-Z0-9-]+)$/);
-    if (requestEditMatch && request.method === "PATCH") {
-      if (currentUser.role !== "REPORTER") {
-        return json({ error: "Hanya pelapor (REPORTER) yang dapat mengubah laporan." }, 403);
-      }
-
-      const requestId = requestEditMatch[1];
-      const input = await request.json() as {
-        title?: string;
-        description?: string;
-        category_id?: string;
-        room_id?: string;
-        urgency?: string;
-        reason?: string;
-      };
-
-      // Validasi: alasan perubahan wajib diisi
-      if (!input.reason || input.reason.trim().length < 5) {
-        return json({ error: "Alasan perubahan wajib diisi (minimal 5 karakter)." }, 422);
-      }
-
-      // Ambil data laporan saat ini dan pastikan milik pelapor
-      const existingRequest = await env.DB.prepare(`
-        SELECT id, reporter_id, title, description, category_id, room_id, urgency, status, request_number
-        FROM service_requests WHERE id = ?
-      `).bind(requestId).first<{
-        id: string; reporter_id: string; title: string; description: string;
-        category_id: string; room_id: string; urgency: string; status: string; request_number: string;
-      }>();
-
-      if (!existingRequest) {
-        return json({ error: "Laporan tidak ditemukan." }, 404);
-      }
-
-      if (existingRequest.reporter_id !== currentUser.id) {
-        return json({ error: "Anda hanya dapat mengubah laporan milik sendiri." }, 403);
-      }
-
-      // Hanya boleh edit jika status masih awal
-      const editableStatuses = ["SUBMITTED", "UNDER_REVIEW", "REJECTED"];
-      if (!editableStatuses.includes(existingRequest.status)) {
-        return json({ error: "Laporan tidak dapat diubah pada status saat ini." }, 422);
-      }
-
-      // Validasi field yang akan diubah
-      const updates: Record<string, unknown> = {};
-      const editRecord: Record<string, unknown> = {
-        id: crypto.randomUUID(),
-        request_id: requestId,
-        edited_by_user_id: currentUser.id,
-        old_title: existingRequest.title,
-        new_title: existingRequest.title,
-        old_description: existingRequest.description,
-        new_description: existingRequest.description,
-        old_category_id: existingRequest.category_id,
-        new_category_id: existingRequest.category_id,
-        old_room_id: existingRequest.room_id,
-        new_room_id: existingRequest.room_id,
-        old_urgency: existingRequest.urgency,
-        new_urgency: existingRequest.urgency,
-        reason: input.reason.trim(),
-      };
-
-      if (input.title !== undefined) {
-        const trimmed = input.title.trim();
-        if (!trimmed) {
-          return json({ error: "Judul tidak boleh kosong." }, 422);
-        }
-        updates.title = trimmed;
-        editRecord.new_title = trimmed;
-      }
-
-      if (input.description !== undefined) {
-        const trimmed = input.description.trim();
-        if (trimmed.length < 20) {
-          return json({ error: "Deskripsi minimal 20 karakter." }, 422);
-        }
-        updates.description = trimmed;
-        editRecord.new_description = trimmed;
-      }
-
-      if (input.category_id !== undefined) {
-        const categoryExists = await env.DB.prepare(`
-          SELECT id FROM categories WHERE id = ? AND is_active = 1
-        `).bind(input.category_id).first();
-        if (!categoryExists) {
-          return json({ error: "Kategori tidak valid." }, 422);
-        }
-        updates.category_id = input.category_id;
-        editRecord.new_category_id = input.category_id;
-      }
-
-      if (input.room_id !== undefined) {
-        const roomExists = await env.DB.prepare(`
-          SELECT id FROM rooms WHERE id = ? AND is_active = 1
-        `).bind(input.room_id).first();
-        if (!roomExists) {
-          return json({ error: "Ruangan tidak valid." }, 422);
-        }
-        updates.room_id = input.room_id;
-        editRecord.new_room_id = input.room_id;
-      }
-
-      if (input.urgency !== undefined) {
-        if (!["LOW", "MEDIUM", "HIGH", "URGENT"].includes(input.urgency)) {
-          return json({ error: "Tingkat urgensi tidak valid." }, 422);
-        }
-        updates.urgency = input.urgency;
-        editRecord.new_urgency = input.urgency;
-      }
-
-      // Jika tidak ada field yang diubah
-      if (Object.keys(updates).length === 0) {
-        return json({ error: "Tidak ada field yang diubah." }, 422);
-      }
-
-      // Update laporan: kembalikan status ke UNDER_REVIEW dan hapus rejection_reason jika ada
-      const newStatus = "UNDER_REVIEW";
-      const oldStatus = existingRequest.status;
-
-      await env.DB.prepare(`
-        UPDATE service_requests
-        SET title = COALESCE(?, title),
-            description = COALESCE(?, description),
-            category_id = COALESCE(?, category_id),
-            room_id = COALESCE(?, room_id),
-            urgency = COALESCE(?, urgency),
-            status = ?,
-            rejection_reason = CASE WHEN ? = 'REJECTED' THEN NULL ELSE rejection_reason END,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `).bind(
-        updates.title ?? null,
-        updates.description ?? null,
-        updates.category_id ?? null,
-        updates.room_id ?? null,
-        updates.urgency ?? null,
-        newStatus,
-        oldStatus,
-        requestId
-      ).run();
-
-      // Simpan riwayat perubahan ke request_edits
-      await env.DB.prepare(`
-        INSERT INTO request_edits
-        (id, request_id, edited_by_user_id, old_title, new_title, old_description, new_description,
-         old_category_id, new_category_id, old_room_id, new_room_id, old_urgency, new_urgency, reason)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).bind(
-        editRecord.id,
-        editRecord.request_id,
-        editRecord.edited_by_user_id,
-        editRecord.old_title,
-        editRecord.new_title,
-        editRecord.old_description,
-        editRecord.new_description,
-        editRecord.old_category_id,
-        editRecord.new_category_id,
-        editRecord.old_room_id,
-        editRecord.new_room_id,
-        editRecord.old_urgency,
-        editRecord.new_urgency,
-        editRecord.reason
-      ).run();
-
-      // Catat perubahan status di history
-      await recordStatusHistory(env, requestId, oldStatus, newStatus, currentUser.id, `Diedit pelapor: ${input.reason.trim()}`);
-
-      // Kirim notifikasi ke admin bahwa laporan diedit
-      await notifyStatusChange(env, requestId, "EDITED", currentUser.id);
-
-      return json({
-        success: true,
-        status: newStatus,
-        message: "Laporan berhasil diubah dan dikembalikan ke pemeriksaan admin."
-      }, 200);
-    }
-
-    // Endpoint POST /api/requests/:id/cancel - Pelapor membatalkan laporan (FR-034, AC-022)
-    const requestCancelMatch = url.pathname.match(/^\/api\/requests\/([a-zA-Z0-9-]+)\/cancel$/);
-    if (requestCancelMatch && request.method === "POST") {
-      if (currentUser.role !== "REPORTER") {
-        return json({ error: "Hanya pelapor (REPORTER) yang dapat membatalkan laporan." }, 403);
-      }
-
-      const requestId = requestCancelMatch[1];
-      const input = await request.json() as { reason?: string };
-
-      // Validasi: alasan pembatalan wajib diisi
-      if (!input.reason || input.reason.trim().length < 5) {
-        return json({ error: "Alasan pembatalan wajib diisi (minimal 5 karakter)." }, 422);
-      }
-
-      // Ambil data laporan dan pastikan milik pelapor
-      const existingRequest = await env.DB.prepare(`
-        SELECT id, reporter_id, status, title FROM service_requests WHERE id = ?
-      `).bind(requestId).first<{ id: string; reporter_id: string; status: string; title: string }>();
-
-      if (!existingRequest) {
-        return json({ error: "Laporan tidak ditemukan." }, 404);
-      }
-
-      if (existingRequest.reporter_id !== currentUser.id) {
-        return json({ error: "Anda hanya dapat membatalkan laporan milik sendiri." }, 403);
-      }
-
-      // Hanya boleh cancel jika status masih awal
-      const cancellableStatuses = ["SUBMITTED", "UNDER_REVIEW", "REJECTED"];
-      if (!cancellableStatuses.includes(existingRequest.status)) {
-        return json({ error: "Laporan tidak dapat dibatalkan pada status saat ini." }, 422);
-      }
-
-      // Update status ke CANCELLED
-      await env.DB.prepare(`
-        UPDATE service_requests
-        SET status = 'CANCELLED', updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `).bind(requestId).run();
-
-      // Catat perubahan status
-      await recordStatusHistory(env, requestId, existingRequest.status, "CANCELLED", currentUser.id, input.reason.trim());
-
-      // Kirim notifikasi ke admin
-      await notifyStatusChange(env, requestId, "CANCELLED", currentUser.id);
-
-      return json({
-        success: true,
-        status: "CANCELLED",
-        message: "Laporan berhasil dibatalkan."
-      }, 200);
-    }
-
-    // Endpoint POST /api/requests/:id/assign-additional
-    const assignAdditionalMatch = url.pathname.match(/^\/api\/requests\/([a-zA-Z0-9-]+)\/assign-additional$/);
-    if (assignAdditionalMatch && request.method === "POST") {
-      if (currentUser.role !== "ADMIN") {
-        return json({ error: "Hanya administrator (ADMIN) yang dapat menambahkan teknisi tambahan." }, 403);
-      }
-
-      const requestId = assignAdditionalMatch[1];
-      const input = await request.json() as {
-        technician_id?: string;
-        reason?: string;
-      };
-
-      if (!input.technician_id) {
-        return json({ error: "Teknisi wajib dipilih." }, 422);
-      }
-
-      // Pastikan laporan ada
-      const checkRequest = await env.DB.prepare(`
-        SELECT id, status FROM service_requests WHERE id = ?
-      `).bind(requestId).first<{ id: string; status: string }>();
-
-      if (!checkRequest) {
-        return json({ error: "Laporan tidak ditemukan." }, 404);
-      }
-
-      // Validasi: hanya boleh tambah teknisi jika status NEED_HELP
-      if (checkRequest.status !== "NEED_HELP") {
-        return json({ error: "Hanya laporan berstatus NEED_HELP yang dapat ditambahkan teknisi tambahan." }, 422);
-      }
-
-      // Pastikan teknisi ada dan role TECHNICIAN
-      const checkTechnician = await env.DB.prepare(`
-        SELECT id, role FROM users WHERE id = ? AND role = 'TECHNICIAN' AND is_active = 1
-      `).bind(input.technician_id).first<{ id: string; role: string }>();
-
-      if (!checkTechnician) {
-        return json({ error: "Teknisi tidak valid atau tidak aktif." }, 422);
-      }
-
-      // Cek apakah teknisi sudah ditugaskan ke laporan ini
-      const existingAssignment = await env.DB.prepare(`
-        SELECT id FROM request_assignments WHERE request_id = ? AND technician_id = ? AND status = 'ACTIVE'
-      `).bind(requestId, input.technician_id).first<{ id: string }>();
-
-      if (existingAssignment) {
-        return json({ error: "Teknisi ini sudah ditugaskan ke laporan." }, 422);
-      }
-
-      // Buat assignment tambahan
-      const assignmentId = crypto.randomUUID();
-      await env.DB.prepare(`
-        INSERT INTO request_assignments
-        (id, request_id, technician_id, assignment_type, status, assigned_by_user_id, reason, created_at, updated_at)
-        VALUES (?, ?, ?, 'ADDITIONAL', 'ACTIVE', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-      `).bind(
-        assignmentId,
-        requestId,
-        input.technician_id,
-        currentUser.id,
-        input.reason?.trim() || null
-      ).run();
-
-      return json({
-        success: true,
-        assignmentId,
-        requestId,
-        technicianId: input.technician_id,
-        assignmentType: "ADDITIONAL"
-      }, 201);
-    }
-
-    // Endpoint POST /api/requests/:id/resolve - Teknisi menyelesaikan pekerjaan
-    const resolveMatch = url.pathname.match(/^\/api\/requests\/([a-zA-Z0-9-]+)\/resolve$/);
-    if (resolveMatch && request.method === "POST") {
-      if (currentUser.role !== "TECHNICIAN") {
-        return json({ error: "Hanya teknisi (TECHNICIAN) yang dapat menyelesaikan pekerjaan." }, 403);
-      }
-
-      const requestId = resolveMatch[1];
-      const checkRequest = await env.DB.prepare(`
-        SELECT id, status FROM service_requests WHERE id = ?
-      `).bind(requestId).first<{ id: string; status: string }>();
-
-      if (!checkRequest) {
-        return json({ error: "Laporan tidak ditemukan." }, 404);
-      }
-
-      if (checkRequest.status !== "IN_PROGRESS") {
-        return json({ error: "Hanya laporan berstatus IN_PROGRESS yang dapat diselesaikan." }, 422);
-      }
-
-      await env.DB.prepare(`
-        UPDATE service_requests
-        SET status = 'WAITING_REPORTER_CONFIRMATION',
-            resolved_at = CURRENT_TIMESTAMP,
-            confirmation_due_at = datetime('now', '+45 minutes'),
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `).bind(requestId).run();
-
-      await recordStatusHistory(env, requestId, "IN_PROGRESS", "RESOLVED", currentUser.id, null);
-      await recordStatusHistory(env, requestId, "RESOLVED", "WAITING_REPORTER_CONFIRMATION", null, null);
-      await notifyStatusChange(env, requestId, "WAITING_REPORTER_CONFIRMATION", currentUser.id);
-
-      return json({ success: true, status: "WAITING_REPORTER_CONFIRMATION" }, 200);
-    }
-
-    // Endpoint POST /api/requests/:id/confirm-resolution - Pelapor konfirmasi selesai
-    const confirmMatch = url.pathname.match(/^\/api\/requests\/([a-zA-Z0-9-]+)\/confirm-resolution$/);
-    if (confirmMatch && request.method === "POST") {
-      if (currentUser.role !== "REPORTER") {
-        return json({ error: "Hanya pelapor (REPORTER) yang dapat mengonfirmasi hasil pekerjaan." }, 403);
-      }
-
-      const requestId = confirmMatch[1];
-      const checkRequest = await env.DB.prepare(`
-        SELECT id, reporter_id, status, confirmation_due_at FROM service_requests WHERE id = ?
-      `).bind(requestId).first<{ id: string; reporter_id: string; status: string; confirmation_due_at: string | null }>();
-
-      if (!checkRequest) {
-        return json({ error: "Laporan tidak ditemukan." }, 404);
-      }
-
-      if (checkRequest.reporter_id !== currentUser.id) {
-        return json({ error: "Anda hanya dapat mengonfirmasi laporan milik sendiri." }, 403);
-      }
-
-      if (checkRequest.status !== "WAITING_REPORTER_CONFIRMATION") {
-        return json({ error: "Laporan tidak dalam status menunggu konfirmasi." }, 422);
-      }
-
-      await env.DB.prepare(`
-        UPDATE service_requests
-        SET status = 'CLOSED_REPORTER_CONFIRMED',
-            closed_at = CURRENT_TIMESTAMP,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `).bind(requestId).run();
-
-      await recordStatusHistory(env, requestId, "WAITING_REPORTER_CONFIRMATION", "CLOSED_REPORTER_CONFIRMED", currentUser.id, null);
-      await notifyStatusChange(env, requestId, "CLOSED_REPORTER_CONFIRMED", currentUser.id);
-
-      return json({ success: true, status: "CLOSED_REPORTER_CONFIRMED" }, 200);
-    }
-
-    // Endpoint POST /api/requests/:id/reject-resolution - Pelapor menolak hasil
-    const rejectResolutionMatch = url.pathname.match(/^\/api\/requests\/([a-zA-Z0-9-]+)\/reject-resolution$/);
-    if (rejectResolutionMatch && request.method === "POST") {
-      if (currentUser.role !== "REPORTER") {
-        return json({ error: "Hanya pelapor (REPORTER) yang dapat menolak hasil pekerjaan." }, 403);
-      }
-
-      const requestId = rejectResolutionMatch[1];
-      const input = await request.json() as { reason?: string };
-
-      if (!input.reason || input.reason.trim().length < 5) {
-        return json({ error: "Alasan penolakan wajib diisi (minimal 5 karakter)." }, 422);
-      }
-
-      const checkRequest = await env.DB.prepare(`
-        SELECT id, reporter_id, status FROM service_requests WHERE id = ?
-      `).bind(requestId).first<{ id: string; reporter_id: string; status: string }>();
-
-      if (!checkRequest) {
-        return json({ error: "Laporan tidak ditemukan." }, 404);
-      }
-
-      if (checkRequest.reporter_id !== currentUser.id) {
-        return json({ error: "Anda hanya dapat menolak hasil laporan milik sendiri." }, 403);
-      }
-
-      if (checkRequest.status !== "WAITING_REPORTER_CONFIRMATION") {
-        return json({ error: "Laporan tidak dalam status menunggu konfirmasi." }, 422);
-      }
-
-      await env.DB.prepare(`
-        UPDATE service_requests
-        SET status = 'REOPEN_REQUESTED',
-            resolution_rejected_reason = ?,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `).bind(input.reason.trim(), requestId).run();
-
-      await recordStatusHistory(env, requestId, "WAITING_REPORTER_CONFIRMATION", "REOPEN_REQUESTED", currentUser.id, input.reason.trim());
-      await notifyStatusChange(env, requestId, "REOPEN_REQUESTED", currentUser.id);
-
-      return json({ success: true, status: "REOPEN_REQUESTED" }, 200);
-    }
-
-    // Endpoint POST /api/requests/:id/close - Admin menutup laporan
-    const closeMatch = url.pathname.match(/^\/api\/requests\/([a-zA-Z0-9-]+)\/close$/);
-    if (closeMatch && request.method === "POST") {
-      if (currentUser.role !== "ADMIN") {
-        return json({ error: "Hanya administrator (ADMIN) yang dapat menutup laporan." }, 403);
-      }
-
-      const requestId = closeMatch[1];
-      const input = await request.json() as { reason?: string };
-      const checkRequest = await env.DB.prepare(`
-        SELECT id, status FROM service_requests WHERE id = ?
-      `).bind(requestId).first<{ id: string; status: string }>();
-
-      if (!checkRequest) {
-        return json({ error: "Laporan tidak ditemukan." }, 404);
-      }
-
-      const closedStatuses = ["CLOSED_AUTO", "CLOSED_ADMIN", "CLOSED_REPORTER_CONFIRMED"];
-      if (closedStatuses.includes(checkRequest.status)) {
-        return json({ error: "Laporan sudah ditutup." }, 422);
-      }
-
-      await env.DB.prepare(`
-        UPDATE service_requests
-        SET status = 'CLOSED_ADMIN',
-            closed_at = CURRENT_TIMESTAMP,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `).bind(requestId).run();
-
-      await recordStatusHistory(env, requestId, checkRequest.status, "CLOSED_ADMIN", currentUser.id, input.reason?.trim() || null);
-      await notifyStatusChange(env, requestId, "CLOSED_ADMIN", currentUser.id);
-
-      return json({ success: true, status: "CLOSED_ADMIN" }, 200);
-    }
-
-    // Endpoint POST /api/requests/:id/reopen - Admin membuka ulang laporan
-    const reopenMatch = url.pathname.match(/^\/api\/requests\/([a-zA-Z0-9-]+)\/reopen$/);
-    if (reopenMatch && request.method === "POST") {
-      if (currentUser.role !== "ADMIN") {
-        return json({ error: "Hanya administrator (ADMIN) yang dapat membuka ulang laporan." }, 403);
-      }
-
-      const requestId = reopenMatch[1];
-      const checkRequest = await env.DB.prepare(`
-        SELECT id, status FROM service_requests WHERE id = ?
-      `).bind(requestId).first<{ id: string; status: string }>();
-
-      if (!checkRequest) {
-        return json({ error: "Laporan tidak ditemukan." }, 404);
-      }
-
-      if (checkRequest.status !== "REOPEN_REQUESTED") {
-        return json({ error: "Hanya laporan berstatus REOPEN_REQUESTED yang dapat dibuka ulang." }, 422);
-      }
-
-      await env.DB.prepare(`
-        UPDATE service_requests
-        SET status = 'REOPENED',
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `).bind(requestId).run();
-
-      await recordStatusHistory(env, requestId, "REOPEN_REQUESTED", "REOPENED", currentUser.id, null);
-      await notifyStatusChange(env, requestId, "REOPENED", currentUser.id);
-
-      return json({ success: true, status: "REOPENED" }, 200);
-    }
-
-    // Endpoint /api/requests
-    if (url.pathname.startsWith("/api/requests")) {
-      
-      // GET /api/requests
-      if (request.method === "GET") {
-        let query = `
-          SELECT sr.id, sr.request_number, sr.title, sr.description, sr.status, sr.urgency, sr.rejection_reason, sr.created_at,
-                 c.name AS category,
-                 r.building || ' - ' || r.floor || ' - ' || r.room_name AS location,
-                 u_tech.name AS technician_name
-          FROM service_requests sr
-          JOIN categories c ON sr.category_id = c.id
-          JOIN rooms r ON sr.room_id = r.id
-          LEFT JOIN request_assignments ra ON sr.id = ra.request_id AND ra.status = 'ACTIVE'
-          LEFT JOIN users u_tech ON ra.technician_id = u_tech.id
-        `;
-        let params: string[] = [];
-
-        // Jika Reporter, filter hanya laporan miliknya sendiri
-        if (currentUser.role === "REPORTER") {
-          query += " WHERE sr.reporter_id = ?";
-          params.push(currentUser.id);
-        }
-
-        // Jika Teknisi, filter hanya tugas yang diberikan kepadanya
-        if (currentUser.role === "TECHNICIAN") {
-          query += " WHERE ra.technician_id = ? AND ra.status = 'ACTIVE'";
-          params.push(currentUser.id);
-        }
-
-        query += " ORDER BY sr.created_at DESC";
-
-        const result = await env.DB.prepare(query).bind(...params).all();
-        return json({ data: result.results });
-      }
-
-      // POST /api/requests
-      if (request.method === "POST") {
-        if (currentUser.role !== "REPORTER") {
-          return json({ error: "Hanya pelapor (REPORTER) yang dapat membuat laporan baru." }, 403);
-        }
-
-        const input = await request.json() as {
-          title?: string;
-          description?: string;
-          category_id?: string;
-          room_id?: string;
-          urgency?: string;
-        };
-
-        if (
-          !input.title ||
-          !input.description ||
-          !input.category_id ||
-          !input.room_id ||
-          !input.urgency
-        ) {
-          return json({ error: "Semua field wajib diisi." }, 422);
-        }
-
-        if (input.description.trim().length < 20) {
-          return json({ error: "Deskripsi minimal 20 karakter." }, 422);
-        }
-
-        if (!["LOW", "MEDIUM", "HIGH", "URGENT"].includes(input.urgency)) {
-          return json({ error: "Tingkat urgensi tidak valid." }, 422);
-        }
-
-        // Verifikasi keberadaan Kategori
-        const categoryExists = await env.DB.prepare(`
-          SELECT id FROM categories WHERE id = ? AND is_active = 1
-        `).bind(input.category_id).first();
-
-        if (!categoryExists) {
-          return json({ error: "Kategori tidak valid." }, 422);
-        }
-
-        // Verifikasi keberadaan Ruangan
-        const roomExists = await env.DB.prepare(`
-          SELECT id FROM rooms WHERE id = ? AND is_active = 1
-        `).bind(input.room_id).first();
-
-        if (!roomExists) {
-          return json({ error: "Ruangan tidak valid." }, 422);
-        }
-
-        const id = crypto.randomUUID();
-        const requestNumber = `CSR-${Date.now()}`;
-
-        await env.DB.prepare(`
-          INSERT INTO service_requests
-          (id, request_number, reporter_id, title, description, category_id, room_id, urgency, status)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'SUBMITTED')
-        `).bind(
-          id,
-          requestNumber,
-          currentUser.id,
-          input.title.trim(),
-          input.description.trim(),
-          input.category_id,
-          input.room_id,
-          input.urgency
-        ).run();
-
-        await recordStatusHistory(env, id, null, "SUBMITTED", currentUser.id, null);
-        await notifyStatusChange(env, id, "SUBMITTED", currentUser.id);
-
-        return json({
-          id,
-          requestNumber,
-          status: "SUBMITTED"
-        }, 201);
-      }
-    }
-
-    // Endpoint GET & POST /api/requests/:id/comments
-    const commentsMatch = url.pathname.match(/^\/api\/requests\/([a-zA-Z0-9-]+)\/comments$/);
-    if (commentsMatch) {
-      const requestId = commentsMatch[1];
-
-      // Pastikan laporan ada
-      const checkRequest = await env.DB.prepare(`
-        SELECT id, reporter_id FROM service_requests WHERE id = ?
-      `).bind(requestId).first<{ id: string; reporter_id: string }>();
-
-      if (!checkRequest) {
-        return json({ error: "Laporan tidak ditemukan." }, 404);
-      }
-
-      // GET /api/requests/:id/comments
-      if (request.method === "GET") {
-        const result = await env.DB.prepare(`
-          SELECT rc.id, rc.content, rc.created_at, u.name AS author_name, u.role AS author_role
-          FROM request_comments rc
-          JOIN users u ON rc.user_id = u.id
-          WHERE rc.request_id = ?
-          ORDER BY rc.created_at ASC
-        `).bind(requestId).all();
-
-        return json({ data: result.results });
-      }
-
-      // POST /api/requests/:id/comments
-      if (request.method === "POST") {
-        const input = await request.json() as { content?: string };
-
-        if (!input.content || input.content.trim().length < 5) {
-          return json({ error: "Komentar wajib diisi (minimal 5 karakter)." }, 422);
-        }
-
-        const commentId = `cmt-${crypto.randomUUID()}`;
-
-        await env.DB.prepare(`
-          INSERT INTO request_comments (id, request_id, user_id, content)
-          VALUES (?, ?, ?, ?)
-        `).bind(commentId, requestId, currentUser.id, input.content.trim()).run();
-
-        return json({ success: true, id: commentId }, 201);
-      }
-    }
-
-    // Endpoint GET /api/notifications - Ambil notifikasi pengguna saat ini
-    if (url.pathname === "/api/notifications" && request.method === "GET") {
-      const result = await env.DB.prepare(`
-        SELECT id, type, title, message, request_id, is_read, read_at, created_at
-        FROM notifications
-        WHERE user_id = ?
-        ORDER BY created_at DESC
-        LIMIT 50
-      `).bind(currentUser.id).all();
-
-      const unreadCount = await env.DB.prepare(`
-        SELECT COUNT(*) AS count FROM notifications
-        WHERE user_id = ? AND is_read = 0
-      `).bind(currentUser.id).first<{ count: number }>();
-
-      return json({
-        data: result.results,
-        unread_count: unreadCount?.count || 0
+import { useEffect, useState } from "react";
+
+import "./App.css";
+
+type ServiceRequest = {
+  id: string;
+  request_number: string;
+  title: string;
+  description?: string;
+  location: string;
+  category: string;
+  priority: string;
+  status: string;
+  urgency: string;
+  rejection_reason?: string;
+  resolution_rejected_reason?: string;
+  resolved_at?: string;
+  confirmation_due_at?: string;
+  closed_at?: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
+type StatusHistoryItem = {
+  id: string;
+  from_status: string | null;
+  to_status: string;
+  reason: string | null;
+  created_at: string;
+  changed_by_name: string;
+  changed_by_role: string;
+};
+
+type CommentItem = {
+  id: string;
+  content: string;
+  created_at: string;
+  author_name: string;
+  author_role: string;
+};
+
+type NotificationItem = {
+  id: string;
+  type: string;
+  title: string;
+  message: string;
+  request_id: string | null;
+  is_read: number;
+  read_at: string | null;
+  created_at: string;
+};
+
+type UserSession = {
+  id: string;
+  campus_email: string;
+  name: string;
+  role: string;
+};
+
+type Category = {
+  id: string;
+  name: string;
+};
+
+type Room = {
+  id: string;
+  building: string;
+  floor: string;
+  room_name: string;
+};
+
+export default function App() {
+  const [user, setUser] = useState<UserSession | null>(null);
+
+  // Login Form States
+  const [emailInput, setEmailInput] = useState("");
+  const [roleInput, setRoleInput] = useState("REPORTER");
+  const [loginError, setLoginError] = useState("");
+
+  // Metadata Lists
+  const [categoriesList, setCategoriesList] = useState<Category[]>([]);
+  const [roomsList, setRoomsList] = useState<Room[]>([]);
+
+  // Request Form & List States
+  const [requests, setRequests] = useState<ServiceRequest[]>([]);
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [selectedCategoryId, setSelectedCategoryId] = useState("");
+  const [urgency, setUrgency] = useState("MEDIUM");
+  const [message, setMessage] = useState("");
+
+  // Dynamic Room Dropdowns
+  const [selectedBuilding, setSelectedBuilding] = useState("");
+  const [selectedFloor, setSelectedFloor] = useState("");
+  const [selectedRoomId, setSelectedRoomId] = useState("");
+  const [selectedRequestDetail, setSelectedRequestDetail] = useState<ServiceRequest | null>(null);
+  const [statusHistory, setStatusHistory] = useState<StatusHistoryItem[]>([]);
+  const [comments, setComments] = useState<CommentItem[]>([]);
+  const [newComment, setNewComment] = useState("");
+  const [detailMessage, setDetailMessage] = useState("");
+  const [rejectResolutionReason, setRejectResolutionReason] = useState("");
+  const [closureMessage, setClosureMessage] = useState("");
+  const [confirmLoading, setConfirmLoading] = useState(false);
+
+  // Reporter Edit & Cancel States (FR-031, FR-034)
+  const [isEditing, setIsEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editCategoryId, setEditCategoryId] = useState("");
+  const [editBuilding, setEditBuilding] = useState("");
+  const [editFloor, setEditFloor] = useState("");
+  const [editRoomId, setEditRoomId] = useState("");
+  const [editUrgency, setEditUrgency] = useState("MEDIUM");
+  const [editReason, setEditReason] = useState("");
+  const [editError, setEditError] = useState("");
+  const [editSuccess, setEditSuccess] = useState("");
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelError, setCancelError] = useState("");
+  const [cancelSuccess, setCancelSuccess] = useState("");
+
+  // Notification States
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [showNotifications, setShowNotifications] = useState(false);
+
+  async function fetchNotifications() {
+    if (!user) return;
+    try {
+      const res = await fetch("/api/notifications", {
+        headers: { "X-User-Email": user.campus_email, "X-User-Role": user.role }
       });
-    }
-
-    // Endpoint POST /api/notifications/:id/read - Tandai notifikasi sudah dibaca
-    const notificationReadMatch = url.pathname.match(/^\/api\/notifications\/([a-zA-Z0-9-]+)\/read$/);
-    if (notificationReadMatch && request.method === "POST") {
-      const notificationId = notificationReadMatch[1];
-
-      const notif = await env.DB.prepare(`
-        SELECT id, user_id FROM notifications WHERE id = ?
-      `).bind(notificationId).first<{ id: string; user_id: string }>();
-
-      if (!notif) {
-        return json({ error: "Notifikasi tidak ditemukan." }, 404);
+      const data = await res.json();
+      if (data.data) {
+        setNotifications(data.data);
+        setUnreadCount(data.unread_count || 0);
       }
-
-      if (notif.user_id !== currentUser.id) {
-        return json({ error: "Anda hanya dapat menandai notifikasi milik sendiri." }, 403);
-      }
-
-      await env.DB.prepare(`
-        UPDATE notifications SET is_read = 1, read_at = CURRENT_TIMESTAMP WHERE id = ?
-      `).bind(notificationId).run();
-
-      return json({ success: true });
+    } catch (e) {
+      // ignore
     }
-
-    // Endpoint POST /api/notifications/read-all - Tandai semua notifikasi sudah dibaca
-    if (url.pathname === "/api/notifications/read-all" && request.method === "POST") {
-      await env.DB.prepare(`
-        UPDATE notifications SET is_read = 1, read_at = CURRENT_TIMESTAMP
-        WHERE user_id = ? AND is_read = 0
-      `).bind(currentUser.id).run();
-
-      return json({ success: true });
-    }
-
-    return json({ error: "Alamat API tidak ditemukan." }, 404);
   }
-} satisfies ExportedHandler<Env>;
+
+  useEffect(() => {
+    if (user) {
+      fetchNotifications();
+      const interval = setInterval(fetchNotifications, 30000);
+      return () => clearInterval(interval);
+    }
+  }, [user]);
+
+  async function handleMarkAsRead(notifId: string) {
+    if (!user) return;
+    try {
+      await fetch(`/api/notifications/${notifId}/read`, {
+        method: "POST",
+        headers: { "X-User-Email": user.campus_email, "X-User-Role": user.role }
+      });
+      setNotifications(prev => prev.map(n =>
+        n.id === notifId ? { ...n, is_read: 1, read_at: new Date().toISOString() } : n
+      ));
+      setUnreadCount(prev => Math.max(0, prev - 1));
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  async function handleMarkAllAsRead() {
+    if (!user) return;
+    try {
+      await fetch("/api/notifications/read-all", {
+        method: "POST",
+        headers: { "X-User-Email": user.campus_email, "X-User-Role": user.role }
+      });
+      setNotifications(prev => prev.map(n => ({ ...n, is_read: 1, read_at: new Date().toISOString() })));
+      setUnreadCount(0);
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  // Admin Action States
+  const [selectedRequest, setSelectedRequest] = useState<ServiceRequest | null>(null);
+  const [rejectionReasonInput, setRejectionReasonInput] = useState("");
+  const [adminError, setAdminError] = useState("");
+  const [adminSuccess, setAdminSuccess] = useState("");
+
+  // Load session from localStorage on mount
+  useEffect(() => {
+    const savedSession = localStorage.getItem("campus_session");
+    if (savedSession) {
+      try {
+        setUser(JSON.parse(savedSession));
+      } catch (e) {
+        localStorage.removeItem("campus_session");
+      }
+    }
+  }, []);
+
+  // Load requests and metadata on login
+  useEffect(() => {
+    if (user) {
+      if (["REPORTER", "ADMIN"].includes(user.role)) {
+        loadRequests();
+      }
+      if (user.role === "REPORTER") {
+        loadMetadata();
+      }
+    }
+  }, [user]);
+
+  async function loadMetadata() {
+    if (!user) return;
+    try {
+      const catResponse = await fetch("/api/categories", {
+        headers: {
+          "X-User-Email": user.campus_email,
+          "X-User-Role": user.role
+        }
+      });
+      const catResult = await catResponse.json();
+      const cats = catResult.data ?? [];
+      setCategoriesList(cats);
+      if (cats.length > 0) {
+        setSelectedCategoryId(cats[0].id);
+      }
+
+      const roomResponse = await fetch("/api/rooms", {
+        headers: {
+          "X-User-Email": user.campus_email,
+          "X-User-Role": user.role
+        }
+      });
+      const roomResult = await roomResponse.json();
+      const rooms = roomResult.data ?? [];
+      setRoomsList(rooms);
+
+      if (rooms.length > 0) {
+        const buildings = Array.from(new Set(rooms.map((r: Room) => r.building))) as string[];
+        const defaultBuilding = buildings[0];
+        setSelectedBuilding(defaultBuilding);
+
+        const floors = Array.from(new Set(rooms.filter((r: Room) => r.building === defaultBuilding).map((r: Room) => r.floor))) as string[];
+        const defaultFloor = floors[0];
+        setSelectedFloor(defaultFloor);
+
+        const filteredRooms = rooms.filter((r: Room) => r.building === defaultBuilding && r.floor === defaultFloor);
+        if (filteredRooms.length > 0) {
+          setSelectedRoomId(filteredRooms[0].id);
+        }
+      }
+    } catch (e) {
+      console.error("Gagal memuat data master", e);
+    }
+  }
+
+  function handleBuildingChange(building: string) {
+    setSelectedBuilding(building);
+    const floors = Array.from(new Set(roomsList.filter(r => r.building === building).map(r => r.floor)));
+    const defaultFloor = floors[0] ?? "";
+    setSelectedFloor(defaultFloor);
+
+    const filteredRooms = roomsList.filter(r => r.building === building && r.floor === defaultFloor);
+    setSelectedRoomId(filteredRooms[0]?.id ?? "");
+  }
+
+  function handleFloorChange(floor: string) {
+    setSelectedFloor(floor);
+    const filteredRooms = roomsList.filter(r => r.building === selectedBuilding && r.floor === floor);
+    setSelectedRoomId(filteredRooms[0]?.id ?? "");
+  }
+
+  async function loadRequests() {
+    if (!user) return;
+    try {
+      const response = await fetch("/api/requests", {
+        headers: {
+          "X-User-Email": user.campus_email,
+          "X-User-Role": user.role
+        }
+      });
+
+      if (response.status === 401) {
+        handleLogout();
+        return;
+      }
+
+      const result = await response.json() as { data?: ServiceRequest[] };
+      setRequests(result.data ?? []);
+    } catch (e) {
+      console.error("Gagal memuat laporan", e);
+    }
+  }
+
+  async function handleLogin(event: React.FormEvent) {
+    event.preventDefault();
+    setLoginError("");
+
+    if (!emailInput.trim()) {
+      setLoginError("Email kampus wajib diisi.");
+      return;
+    }
+
+    const email = emailInput.trim();
+    if (!email.endsWith(".ac.id") && !email.endsWith("campus.ac.id")) {
+      setLoginError("Format email kampus tidak valid (harus berakhiran .ac.id).");
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, role: roleInput })
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        setLoginError(result.error ?? "Login gagal dilakukan.");
+        return;
+      }
+
+      setUser(result.user);
+      localStorage.setItem("campus_session", JSON.stringify(result.user));
+    } catch (e) {
+      setLoginError("Koneksi gagal. Silakan coba beberapa saat lagi.");
+    }
+  }
+
+  function handleLogout() {
+    setUser(null);
+    localStorage.removeItem("campus_session");
+    setRequests([]);
+    setEmailInput("");
+    setLoginError("");
+    setCategoriesList([]);
+    setRoomsList([]);
+    setSelectedRequest(null);
+    setRejectionReasonInput("");
+    setAdminError("");
+    setAdminSuccess("");
+    setStatusHistory([]);
+    setComments([]);
+    setNewComment("");
+    setDetailMessage("");
+    setMessage("");
+    resetEditState();
+    resetCancelState();
+  }
+
+  function resetEditState() {
+    setIsEditing(false);
+    setEditTitle("");
+    setEditDescription("");
+    setEditCategoryId("");
+    setEditBuilding("");
+    setEditFloor("");
+    setEditRoomId("");
+    setEditUrgency("MEDIUM");
+    setEditReason("");
+    setEditError("");
+    setEditSuccess("");
+  }
+
+  function resetCancelState() {
+    setShowCancelModal(false);
+    setCancelReason("");
+    setCancelError("");
+    setCancelSuccess("");
+  }
+
+  async function loadRequestDetail(requestId: string) {
+    if (!user) return;
+    try {
+      const response = await fetch(`/api/requests/${requestId}`, {
+        headers: { "X-User-Email": user.campus_email, "X-User-Role": user.role }
+      });
+      if (!response.ok) return;
+      const result = await response.json();
+      setSelectedRequestDetail(result.data ?? null);
+    } catch (e) {
+      console.error("Gagal memuat detail laporan", e);
+    }
+  }
+
+  async function loadStatusHistory(requestId: string) {
+    if (!user) return;
+    try {
+      const response = await fetch(`/api/requests/${requestId}/status-history`, {
+        headers: { "X-User-Email": user.campus_email, "X-User-Role": user.role }
+      });
+      if (!response.ok) return;
+      const result = await response.json();
+      setStatusHistory(result.data ?? []);
+    } catch (e) {
+      console.error("Gagal memuat riwayat status", e);
+    }
+  }
+
+  async function loadComments(requestId: string) {
+    if (!user) return;
+    try {
+      const response = await fetch(`/api/requests/${requestId}/comments`, {
+        headers: { "X-User-Email": user.campus_email, "X-User-Role": user.role }
+      });
+      if (!response.ok) return;
+      const result = await response.json();
+      setComments(result.data ?? []);
+    } catch (e) {
+      console.error("Gagal memuat komentar", e);
+    }
+  }
+
+  async function handleSelectRequest(item: ServiceRequest) {
+    setDetailMessage("");
+    setSelectedRequestDetail(null);
+    setStatusHistory([]);
+    setComments([]);
+    setNewComment("");
+    resetEditState();
+    resetCancelState();
+    await Promise.all([
+      loadRequestDetail(item.id),
+      loadStatusHistory(item.id),
+      loadComments(item.id),
+    ]);
+  }
+
+  async function handleAddComment(requestId: string) {
+    if (!user) return;
+    if (!newComment.trim() || newComment.trim().length < 5) {
+      setDetailMessage("Komentar wajib diisi (minimal 5 karakter).");
+      return;
+    }
+    try {
+      const response = await fetch(`/api/requests/${requestId}/comments`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-User-Email": user.campus_email,
+          "X-User-Role": user.role
+        },
+        body: JSON.stringify({ content: newComment })
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        setDetailMessage(result.error ?? "Gagal menambahkan komentar.");
+        return;
+      }
+      setNewComment("");
+      setDetailMessage("Komentar berhasil ditambahkan.");
+      await loadComments(requestId);
+    } catch (e) {
+      setDetailMessage("Koneksi terputus. Gagal mengirim komentar.");
+    }
+  }
+
+  // FR-031: Reporter Edit Request
+  function handleStartEdit() {
+    if (!selectedRequestDetail) return;
+    setEditTitle(selectedRequestDetail.title);
+    setEditDescription(selectedRequestDetail.description ?? "");
+    setEditUrgency(selectedRequestDetail.urgency);
+    setEditReason("");
+    setEditError("");
+    setEditSuccess("");
+
+    // Parse location: "Building - Floor - Room"
+    const locParts = selectedRequestDetail.location.split(" - ");
+    const building = locParts[0] ?? "";
+    const floor = locParts[1] ?? "";
+    setEditBuilding(building);
+    setEditFloor(floor);
+
+    // Find matching room
+    const matchingRoom = roomsList.find(r => r.building === building && r.floor === floor);
+    if (matchingRoom) {
+      setEditRoomId(matchingRoom.id);
+    }
+
+    // Find matching category
+    const matchingCat = categoriesList.find(c => c.name === selectedRequestDetail.category);
+    if (matchingCat) {
+      setEditCategoryId(matchingCat.id);
+    }
+
+    setIsEditing(true);
+  }
+
+  async function handleEditSubmit(requestId: string) {
+    if (!user) return;
+    setEditError("");
+    setEditSuccess("");
+
+    if (!editReason.trim() || editReason.trim().length < 5) {
+      setEditError("Alasan perubahan wajib diisi (minimal 5 karakter).");
+      return;
+    }
+
+    if (!editTitle.trim()) {
+      setEditError("Judul tidak boleh kosong.");
+      return;
+    }
+
+    if (editDescription.trim().length < 20) {
+      setEditError("Deskripsi minimal 20 karakter.");
+      return;
+    }
+
+    if (!editCategoryId || !editRoomId) {
+      setEditError("Kategori dan ruangan wajib dipilih.");
+      return;
+    }
+
+    try {
+      const payload: Record<string, unknown> = {
+        title: editTitle.trim(),
+        description: editDescription.trim(),
+        category_id: editCategoryId,
+        room_id: editRoomId,
+        urgency: editUrgency,
+        reason: editReason.trim(),
+      };
+
+      const response = await fetch(`/api/requests/${requestId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "X-User-Email": user.campus_email,
+          "X-User-Role": user.role
+        },
+        body: JSON.stringify(payload)
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        setEditError(result.error ?? "Gagal mengubah laporan.");
+        return;
+      }
+
+      setEditSuccess("Laporan berhasil diubah dan dikembalikan ke pemeriksaan admin.");
+      setIsEditing(false);
+      await Promise.all([
+        loadRequestDetail(requestId),
+        loadStatusHistory(requestId),
+        loadRequests()
+      ]);
+    } catch (e) {
+      setEditError("Koneksi terputus. Gagal mengubah laporan.");
+    }
+  }
+
+  // FR-034: Reporter Cancel Request
+  async function handleCancelSubmit(requestId: string) {
+    if (!user) return;
+    setCancelError("");
+    setCancelSuccess("");
+
+    if (!cancelReason.trim() || cancelReason.trim().length < 5) {
+      setCancelError("Alasan pembatalan wajib diisi (minimal 5 karakter).");
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/requests/${requestId}/cancel`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-User-Email": user.campus_email,
+          "X-User-Role": user.role
+        },
+        body: JSON.stringify({ reason: cancelReason.trim() })
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        setCancelError(result.error ?? "Gagal membatalkan laporan.");
+        return;
+      }
+
+      setCancelSuccess("Laporan berhasil dibatalkan.");
+      setShowCancelModal(false);
+      setCancelReason("");
+      await Promise.all([
+        loadRequestDetail(requestId),
+        loadStatusHistory(requestId),
+        loadRequests()
+      ]);
+    } catch (e) {
+      setCancelError("Koneksi terputus. Gagal membatalkan laporan.");
+    }
+  }
+
+  async function handleConfirmResolution(requestId: string) {
+    if (!user) return;
+    setConfirmLoading(true);
+    setClosureMessage("");
+    try {
+      const response = await fetch(`/api/requests/${requestId}/confirm-resolution`, {
+        method: "POST",
+        headers: { "X-User-Email": user.campus_email, "X-User-Role": user.role }
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        setClosureMessage(result.error ?? "Gagal mengonfirmasi.");
+        setConfirmLoading(false);
+        return;
+      }
+      setClosureMessage("Laporan berhasil dikonfirmasi.");
+      setConfirmLoading(false);
+      await Promise.all([
+        loadRequestDetail(requestId),
+        loadRequests()
+      ]);
+    } catch (e) {
+      setClosureMessage("Koneksi terputus.");
+      setConfirmLoading(false);
+    }
+  }
+
+  async function handleRejectResolution(requestId: string) {
+    if (!user) return;
+    if (!rejectResolutionReason.trim() || rejectResolutionReason.trim().length < 5) {
+      setClosureMessage("Alasan penolakan wajib diisi (minimal 5 karakter).");
+      return;
+    }
+    setConfirmLoading(true);
+    setClosureMessage("");
+    try {
+      const response = await fetch(`/api/requests/${requestId}/reject-resolution`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-User-Email": user.campus_email,
+          "X-User-Role": user.role
+        },
+        body: JSON.stringify({ reason: rejectResolutionReason })
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        setClosureMessage(result.error ?? "Gagal menolak hasil.");
+        setConfirmLoading(false);
+        return;
+      }
+      setRejectResolutionReason("");
+      setClosureMessage("Penolakan hasil berhasil dikirim.");
+      setConfirmLoading(false);
+      await Promise.all([
+        loadRequestDetail(requestId),
+        loadRequests()
+      ]);
+    } catch (e) {
+      setClosureMessage("Koneksi terputus.");
+      setConfirmLoading(false);
+    }
+  }
+
+  async function handleAdminClose(requestId: string) {
+    if (!user) return;
+    setAdminError("");
+    setAdminSuccess("");
+    try {
+      const response = await fetch(`/api/requests/${requestId}/close`, {
+        method: "POST",
+        headers: { "X-User-Email": user.campus_email, "X-User-Role": user.role }
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        setAdminError(result.error ?? "Gagal menutup laporan.");
+        return;
+      }
+      setAdminSuccess("Laporan berhasil ditutup.");
+      setSelectedRequest(null);
+      await loadRequests();
+    } catch (e) {
+      setAdminError("Koneksi terputus.");
+    }
+  }
+
+  async function handleAdminReopen(requestId: string) {
+    if (!user) return;
+    setAdminError("");
+    setAdminSuccess("");
+    try {
+      const response = await fetch(`/api/requests/${requestId}/reopen`, {
+        method: "POST",
+        headers: { "X-User-Email": user.campus_email, "X-User-Role": user.role }
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        setAdminError(result.error ?? "Gagal membuka ulang laporan.");
+        return;
+      }
+      setAdminSuccess("Laporan berhasil dibuka ulang.");
+      setSelectedRequest(null);
+      await loadRequests();
+    } catch (e) {
+      setAdminError("Koneksi terputus.");
+    }
+  }
+
+  async function handleReject(requestId: string) {
+    setAdminError("");
+    setAdminSuccess("");
+
+    if (!rejectionReasonInput.trim() || rejectionReasonInput.trim().length < 5) {
+      setAdminError("Alasan penolakan minimal 5 karakter.");
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/requests/${requestId}/reject`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-User-Email": user?.campus_email ?? "",
+          "X-User-Role": user?.role ?? ""
+        },
+        body: JSON.stringify({ reason: rejectionReasonInput })
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        setAdminError(result.error ?? "Gagal menolak laporan.");
+        return;
+      }
+
+      setAdminSuccess("Laporan berhasil ditolak.");
+      setRejectionReasonInput("");
+      setSelectedRequest(null);
+      await loadRequests();
+    } catch (e) {
+      setAdminError("Koneksi bermasalah. Gagal mengirim penolakan.");
+    }
+  }
+
+  async function submitRequest(event: React.FormEvent) {
+    event.preventDefault();
+    setMessage("");
+
+    if (!user) return;
+
+    if (!title.trim() || !description.trim() || !selectedCategoryId || !selectedRoomId || !urgency) {
+      setMessage("Semua field wajib diisi.");
+      return;
+    }
+
+    if (description.trim().length < 20) {
+      setMessage("Deskripsi minimal 20 karakter.");
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/requests", {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json",
+          "X-User-Email": user.campus_email,
+          "X-User-Role": user.role
+        },
+        body: JSON.stringify({
+          title,
+          description,
+          category_id: selectedCategoryId,
+          room_id: selectedRoomId,
+          urgency,
+        }),
+      });
+
+      const result = await response.json() as { error?: string; requestNumber?: string };
+
+      if (!response.ok) {
+        setMessage(result.error ?? "Laporan gagal dibuat.");
+        return;
+      }
+
+      setMessage(`Laporan berhasil dibuat: ${result.requestNumber}`);
+      setTitle("");
+      setDescription("");
+      await loadRequests();
+    } catch (e) {
+      setMessage("Koneksi terputus. Gagal mengirim laporan.");
+    }
+  }
+
+  // Tampilan Sebelum Login
+  if (!user) {
+    return (
+      <div className="login-wrapper">
+        <div className="premium-card">
+          <h2 style={{ fontSize: 28, marginBottom: 8, color: "var(--text-h)" }}>Campus Service</h2>
+          <p style={{ color: "var(--text)", marginBottom: 28 }}>Silakan masuk menggunakan akun kampus Anda.</p>
+
+          {loginError && <div className="alert-error">{loginError}</div>}
+
+          <form onSubmit={handleLogin}>
+            <div className="form-group">
+              <label htmlFor="email">Email Kampus</label>
+              <input
+                id="email"
+                type="text"
+                placeholder="misal: student@campus.ac.id"
+                value={emailInput}
+                onChange={(e) => setEmailInput(e.target.value)}
+                className="form-input"
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="role">Masuk Sebagai (Simulasi Role)</label>
+              <select
+                id="role"
+                value={roleInput}
+                onChange={(e) => setRoleInput(e.target.value)}
+                className="form-select"
+              >
+                <option value="REPORTER">Pelapor (Reporter)</option>
+                <option value="ADMIN">Administrator (Admin)</option>
+                <option value="TECHNICIAN">Teknisi (Technician)</option>
+                <option value="FACILITY_MANAGER">Manajer Fasilitas</option>
+              </select>
+            </div>
+
+            <button type="submit" className="btn-primary">Masuk</button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  // Dynamic lists from room metadata
+  const buildingsList = Array.from(new Set(roomsList.map(r => r.building)));
+  const floorsList = Array.from(new Set(roomsList.filter(r => r.building === selectedBuilding).map(r => r.floor)));
+  const filteredRooms = roomsList.filter(r => r.building === selectedBuilding && r.floor === selectedFloor);
+
+  // Edit dropdown helpers
+  const editBuildingsList = Array.from(new Set(roomsList.map(r => r.building)));
+  const editFloorsList = Array.from(new Set(roomsList.filter(r => r.building === editBuilding).map(r => r.floor)));
+  const editFilteredRooms = roomsList.filter(r => r.building === editBuilding && r.floor === editFloor);
+
+  // Tampilan Setelah Login (Header Global)
+  return (
+    <div>
+      <header className="app-header">
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <h2 style={{ margin: 0, fontSize: 20 }}>Campus Service Request</h2>
+        </div>
+        <div className="user-profile">
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontWeight: 600, color: "var(--text-h)", fontSize: 15 }}>{user.name}</div>
+            <div style={{ fontSize: 13, color: "var(--text)" }}>{user.campus_email}</div>
+          </div>
+          <div style={{ position: "relative" }}>
+            <button onClick={() => setShowNotifications(!showNotifications)} className="notif-bell">
+              &#128276;
+              {unreadCount > 0 && <span className="notif-badge">{unreadCount > 99 ? "99+" : unreadCount}</span>}
+            </button>
+
+            {showNotifications && (
+              <div className="notif-dropdown">
+                <div className="notif-header">
+                  <span>Notifikasi</span>
+                  {unreadCount > 0 && (
+                    <button onClick={handleMarkAllAsRead} className="notif-mark-all">
+                      Tandai semua dibaca
+                    </button>
+                  )}
+                </div>
+                {notifications.length === 0 ? (
+                  <div className="notif-empty">Belum ada notifikasi.</div>
+                ) : (
+                  notifications.map(n => (
+                    <div
+                      key={n.id}
+                      className={`notif-item${n.is_read ? "" : " unread"}`}
+                      onClick={() => {
+                        if (!n.is_read) handleMarkAsRead(n.id);
+                        if (n.request_id) {
+                          setShowNotifications(false);
+                          const found = requests.find(r => r.id === n.request_id);
+                          if (found) {
+                            handleSelectRequest(found);
+                          } else {
+                            setDetailMessage("");
+                            setSelectedRequestDetail(null);
+                            setStatusHistory([]);
+                            setComments([]);
+                            loadRequestDetail(n.request_id);
+                            loadStatusHistory(n.request_id);
+                            loadComments(n.request_id);
+                          }
+                        }
+                      }}
+                    >
+                      <div className="notif-icon">
+                        {n.type === "STATUS_CHANGE" ? "&#128204;" :
+                         n.type === "RESOLVED" ? "&#9989;" :
+                         n.type === "WAITING_PARTS" ? "&#128295;" :
+                         n.type === "NEED_HELP" ? "&#128170;" :
+                         n.type === "PAUSED" ? "&#9200;" :
+                         n.type === "REOPENED" ? "&#128257;" : "&#128276;"}
+                      </div>
+                      <div className="notif-content">
+                        <div className="notif-title">{n.title}</div>
+                        <div className="notif-message">{n.message}</div>
+                        <div className="notif-time">{new Date(n.created_at).toLocaleString("id-ID")}</div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+
+          <span className="role-badge">{user.role}</span>
+          <button onClick={handleLogout} className="btn-logout">Logout</button>
+        </div>
+      </header>
+
+      {/* Render panel berdasarkan Role */}
+      {user.role === "REPORTER" && (
+        <main className="workspace-container">
+          <h1>Buat Laporan Baru</h1>
+          <p style={{ marginBottom: 32 }}>Laporkan masalah fasilitas kampus secara langsung.</p>
+
+          {message && (
+            <div className={message.startsWith("Laporan berhasil") ? "alert-success" : "alert-error"}>
+              {message}
+            </div>
+          )}
+
+          <div className="flex-container">
+            <div className="flex-main">
+              <form onSubmit={submitRequest} style={{ background: "var(--social-bg)", padding: 32, borderRadius: 12, border: "1px solid var(--border)" }}>
+                <div className="form-group">
+                  <label>Judul Masalah</label>
+                  <input 
+                    type="text"
+                    value={title} 
+                    onChange={(e) => setTitle(e.target.value)} 
+                    placeholder="misal: AC Kelas B301 tidak dingin"
+                    className="form-input"
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>Deskripsi Detail</label>
+                  <textarea
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    placeholder="Jelaskan secara spesifik agar teknisi mudah mengidentifikasi (minimal 20 karakter)..."
+                    rows={4}
+                    className="form-textarea"
+                  />
+                </div>
+
+                {/* Dropdown Lokasi Bertingkat */}
+                <div className="form-group" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
+                  <div>
+                    <label>Gedung</label>
+                    <select
+                      value={selectedBuilding}
+                      onChange={(e) => handleBuildingChange(e.target.value)}
+                      className="form-select"
+                    >
+                      {buildingsList.map(b => (
+                        <option key={b} value={b}>{b}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label>Lantai</label>
+                    <select
+                      value={selectedFloor}
+                      onChange={(e) => handleFloorChange(e.target.value)}
+                      className="form-select"
+                    >
+                      {floorsList.map(f => (
+                        <option key={f} value={f}>{f}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label>Ruangan</label>
+                    <select
+                      value={selectedRoomId}
+                      onChange={(e) => setSelectedRoomId(e.target.value)}
+                      className="form-select"
+                    >
+                      {filteredRooms.map(r => (
+                        <option key={r.id} value={r.id}>{r.room_name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="form-group" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                  <div>
+                    <label>Kategori Masalah</label>
+                    <select 
+                      value={selectedCategoryId} 
+                      onChange={(e) => setSelectedCategoryId(e.target.value)}
+                      className="form-select"
+                    >
+                      {categoriesList.map(c => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label>Tingkat Urgensi</label>
+                    <select
+                      value={urgency}
+                      onChange={(e) => setUrgency(e.target.value)}
+                      className="form-select"
+                    >
+                      <option value="LOW">Low</option>
+                      <option value="MEDIUM">Medium</option>
+                      <option value="HIGH">High</option>
+                      <option value="URGENT">Urgent</option>
+                    </select>
+                  </div>
+                </div>
+
+                <button type="submit" className="btn-primary" style={{ width: "auto", paddingInline: 32 }}>Kirim Laporan</button>
+              </form>
+            </div>
+
+            <div className="flex-side">
+              <h2>Laporan Saya</h2>
+              {requests.length === 0 ? (
+                <p style={{ color: "var(--text)", marginTop: 16 }}>Belum ada laporan yang Anda buat.</p>
+              ) : (
+                <table className="premium-table">
+                  <thead>
+                    <tr>
+                      <th>Nomor</th>
+                      <th>Judul</th>
+                      <th>Lokasi</th>
+                      <th>Kategori</th>
+                      <th>Urgensi</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {requests.map((item) => (
+                      <tr key={item.id} style={{ cursor: "pointer" }} onClick={() => handleSelectRequest(item)}>
+                        <td><code>{item.request_number}</code></td>
+                        <td>{item.title}</td>
+                        <td style={{ fontSize: 13 }}>{item.location}</td>
+                        <td>{item.category}</td>
+                        <td>
+                          <span style={{ fontSize: 12, fontWeight: 600 }}>{item.urgency}</span>
+                        </td>
+                        <td>
+                          <span className={`status-indicator ${item.status.toLowerCase() === 'submitted' ? 'submitted' : 'progress'}`}>
+                            {item.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+
+              {/* Detail Laporan Pelapor */}
+              {selectedRequestDetail && (
+                <div style={{ marginTop: 32 }}>
+                  <h2>Detail Laporan</h2>
+                  <div className="premium-card" style={{ maxWidth: "100%", padding: 24, background: "var(--social-bg)" }}>
+
+                    {/* Header Detail */}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+                      <div>
+                        <code style={{ fontSize: 14 }}>{selectedRequestDetail.request_number}</code>
+                        <div style={{ fontSize: 13, color: "var(--text)", marginTop: 4 }}>
+                          Dibuat: {selectedRequestDetail.created_at}
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <span className="role-badge" style={{ fontSize: 11 }}>{selectedRequestDetail.urgency}</span>
+                        <span className={`status-indicator ${selectedRequestDetail.status.toLowerCase() === 'submitted' ? 'submitted' : 'progress'}`}>
+                          {selectedRequestDetail.status}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Edit Mode */}
+                    {isEditing ? (
+                      <div style={{ marginBottom: 20 }}>
+                        <h3 style={{ margin: "0 0 16px", color: "var(--text-h)", fontSize: 18 }}>Edit Laporan</h3>
+
+                        {editError && <div className="alert-error" style={{ marginBottom: 12 }}>{editError}</div>}
+                        {editSuccess && <div className="alert-success" style={{ marginBottom: 12 }}>{editSuccess}</div>}
+
+                        <div className="form-group">
+                          <label>Judul</label>
+                          <input
+                            type="text"
+                            value={editTitle}
+                            onChange={(e) => setEditTitle(e.target.value)}
+                            className="form-input"
+                          />
+                        </div>
+
+                        <div className="form-group">
+                          <label>Deskripsi (minimal 20 karakter)</label>
+                          <textarea
+                            value={editDescription}
+                            onChange={(e) => setEditDescription(e.target.value)}
+                            rows={4}
+                            className="form-textarea"
+                          />
+                        </div>
+
+                        <div className="form-group" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
+                          <div>
+                            <label>Gedung</label>
+                            <select
+                              value={editBuilding}
+                              onChange={(e) => {
+                                setEditBuilding(e.target.value);
+                                const floors = Array.from(new Set(roomsList.filter(r => r.building === e.target.value).map(r => r.floor)));
+                                setEditFloor(floors[0] ?? "");
+                                const rooms = roomsList.filter(r => r.building === e.target.value && r.floor === (floors[0] ?? ""));
+                                setEditRoomId(rooms[0]?.id ?? "");
+                              }}
+                              className="form-select"
+                            >
+                              {editBuildingsList.map(b => (
+                                <option key={b} value={b}>{b}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label>Lantai</label>
+                            <select
+                              value={editFloor}
+                              onChange={(e) => {
+                                setEditFloor(e.target.value);
+                                const rooms = roomsList.filter(r => r.building === editBuilding && r.floor === e.target.value);
+                                setEditRoomId(rooms[0]?.id ?? "");
+                              }}
+                              className="form-select"
+                            >
+                              {editFloorsList.map(f => (
+                                <option key={f} value={f}>{f}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label>Ruangan</label>
+                            <select
+                              value={editRoomId}
+                              onChange={(e) => setEditRoomId(e.target.value)}
+                              className="form-select"
+                            >
+                              {editFilteredRooms.map(r => (
+                                <option key={r.id} value={r.id}>{r.room_name}</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+
+                        <div className="form-group" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                          <div>
+                            <label>Kategori</label>
+                            <select
+                              value={editCategoryId}
+                              onChange={(e) => setEditCategoryId(e.target.value)}
+                              className="form-select"
+                            >
+                              {categoriesList.map(c => (
+                                <option key={c.id} value={c.id}>{c.name}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label>Urgensi</label>
+                            <select
+                              value={editUrgency}
+                              onChange={(e) => setEditUrgency(e.target.value)}
+                              className="form-select"
+                            >
+                              <option value="LOW">Low</option>
+                              <option value="MEDIUM">Medium</option>
+                              <option value="HIGH">High</option>
+                              <option value="URGENT">Urgent</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <div className="form-group">
+                          <label>Alasan Perubahan (wajib, minimal 5 karakter)</label>
+                          <textarea
+                            value={editReason}
+                            onChange={(e) => setEditReason(e.target.value)}
+                            placeholder="Jelaskan mengapa Anda mengubah laporan ini..."
+                            rows={3}
+                            className="form-textarea"
+                          />
+                        </div>
+
+                        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                          <button
+                            onClick={() => handleEditSubmit(selectedRequestDetail.id)}
+                            className="btn-primary"
+                            style={{ width: "auto", paddingInline: 24 }}
+                          >
+                            Simpan Perubahan
+                          </button>
+                          <button
+                            onClick={() => setIsEditing(false)}
+                            className="btn-logout"
+                          >
+                            Batal
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        {/* View Mode - Detail Info */}
+                        <h3 style={{ margin: "0 0 16px", color: "var(--text-h)", fontSize: 20 }}>{selectedRequestDetail.title}</h3>
+
+                        <div style={{ marginBottom: 16 }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", textTransform: "uppercase", letterSpacing: 0.5 }}>Lokasi</div>
+                          <div style={{ color: "var(--text-h)", fontSize: 15 }}>{selectedRequestDetail.location}</div>
+                        </div>
+
+                        <div style={{ marginBottom: 16 }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", textTransform: "uppercase", letterSpacing: 0.5 }}>Kategori</div>
+                          <div style={{ color: "var(--text-h)", fontSize: 15 }}>{selectedRequestDetail.category}</div>
+                        </div>
+
+                        <div style={{ marginBottom: 20 }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", textTransform: "uppercase", letterSpacing: 0.5 }}>Deskripsi</div>
+                          <div style={{ color: "var(--text-h)", fontSize: 14, background: "var(--bg)", padding: 12, borderRadius: 6, border: "1px solid var(--border)", whiteSpace: "pre-line" }}>
+                            {selectedRequestDetail.description}
+                          </div>
+                        </div>
+                      </>
+                    )}
+
+                    {/* Status Timeline */}
+                    <div style={{ marginBottom: 24 }}>
+                      <h4 style={{ margin: "0 0 12px", color: "var(--text-h)", fontSize: 16 }}>Riwayat Status</h4>
+                      {statusHistory.length === 0 ? (
+                        <p style={{ color: "var(--text)", fontSize: 14 }}>Belum ada riwayat status.</p>
+                      ) : (
+                        <div style={{ position: "relative", paddingLeft: 24 }}>
+                          <div style={{ position: "absolute", left: 8, top: 4, bottom: 4, width: 2, background: "var(--border)" }} />
+                          {statusHistory.map((sh) => (
+                            <div key={sh.id} style={{ position: "relative", marginBottom: 16, paddingLeft: 16 }}>
+                              <div style={{ position: "absolute", left: -20, top: 4, width: 12, height: 12, borderRadius: "50%", background: "var(--accent)", border: "2px solid var(--bg)" }} />
+                              <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-h)" }}>
+                                {sh.from_status ? `${sh.from_status} → ${sh.to_status}` : sh.to_status}
+                              </div>
+                              <div style={{ fontSize: 12, color: "var(--text)", marginTop: 2 }}>
+                                {sh.changed_by_name} ({sh.changed_by_role})
+                              </div>
+                              <div style={{ fontSize: 11, color: "var(--text)", marginTop: 1 }}>{sh.created_at}</div>
+                              {sh.reason && (
+                                <div style={{ fontSize: 13, color: "var(--text-h)", marginTop: 4, padding: 8, background: "var(--bg)", borderRadius: 4, border: "1px solid var(--border)" }}>
+                                  {sh.reason}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Comments Thread */}
+                    <div style={{ marginBottom: 24 }}>
+                      <h4 style={{ margin: "0 0 12px", color: "var(--text-h)", fontSize: 16 }}>Komentar</h4>
+
+                      {detailMessage && (
+                        <div className={detailMessage.startsWith("Komentar berhasil") ? "alert-success" : "alert-error"} style={{ marginBottom: 12 }}>
+                          {detailMessage}
+                        </div>
+                      )}
+
+                      {comments.length === 0 ? (
+                        <p style={{ color: "var(--text)", fontSize: 14, marginBottom: 16 }}>Belum ada komentar.</p>
+                      ) : (
+                        <div style={{ marginBottom: 16 }}>
+                          {comments.map((c) => (
+                            <div key={c.id} style={{ marginBottom: 12, padding: 12, background: "var(--bg)", borderRadius: 6, border: "1px solid var(--border)" }}>
+                              <div style={{ fontSize: 14, color: "var(--text-h)", whiteSpace: "pre-line" }}>{c.content}</div>
+                              <div style={{ fontSize: 11, color: "var(--text)", marginTop: 6 }}>
+                                {c.author_name} ({c.author_role}) — {c.created_at}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <input
+                          type="text"
+                          value={newComment}
+                          onChange={(e) => setNewComment(e.target.value)}
+                          placeholder="Tulis komentar..."
+                          className="form-input"
+                          style={{ flex: 1 }}
+                        />
+                        <button
+                          onClick={() => handleAddComment(selectedRequestDetail.id)}
+                          className="btn-primary"
+                          style={{ width: "auto", paddingInline: 20, whiteSpace: "nowrap" }}
+                        >
+                          Kirim
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Cancel Modal */}
+                    {showCancelModal && (
+                      <div style={{ marginBottom: 24, padding: 20, background: "rgba(239, 68, 68, 0.05)", border: "1px solid rgba(239, 68, 68, 0.2)", borderRadius: 8 }}>
+                        <h4 style={{ margin: "0 0 12px", color: "#ef4444", fontSize: 16 }}>Batalkan Laporan</h4>
+                        {cancelError && <div className="alert-error" style={{ marginBottom: 12 }}>{cancelError}</div>}
+                        {cancelSuccess && <div className="alert-success" style={{ marginBottom: 12 }}>{cancelSuccess}</div>}
+                        <p style={{ fontSize: 14, color: "var(--text-h)", marginBottom: 12 }}>
+                          Apakah Anda yakin ingin membatalkan laporan ini? Tindakan ini tidak dapat dibatalkan.
+                        </p>
+                        <div className="form-group">
+                          <label>Alasan Pembatalan (wajib, minimal 5 karakter)</label>
+                          <textarea
+                            value={cancelReason}
+                            onChange={(e) => setCancelReason(e.target.value)}
+                            placeholder="Jelaskan alasan pembatalan..."
+                            rows={3}
+                            className="form-textarea"
+                          />
+                        </div>
+                        <div style={{ display: "flex", gap: 12 }}>
+                          <button
+                            onClick={() => handleCancelSubmit(selectedRequestDetail.id)}
+                            className="btn-logout"
+                            style={{ borderColor: "#ef4444", color: "#ef4444", fontWeight: 600 }}
+                          >
+                            Ya, Batalkan Laporan
+                          </button>
+                          <button
+                            onClick={() => setShowCancelModal(false)}
+                            className="btn-primary"
+                            style={{ width: "auto", paddingInline: 20 }}
+                          >
+                            Tidak, Kembali
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Konfirmasi Hasil Pekerjaan */}
+                    {selectedRequestDetail.status === "WAITING_REPORTER_CONFIRMATION" && (
+                      <div style={{ marginBottom: 24 }}>
+                        <h4 style={{ margin: "0 0 12px", color: "var(--text-h)", fontSize: 16 }}>Konfirmasi Hasil Pekerjaan</h4>
+                        {closureMessage && (
+                          <div className={closureMessage.startsWith("Laporan berhasil") || closureMessage.startsWith("Penolakan") ? "alert-success" : "alert-error"} style={{ marginBottom: 12 }}>
+                            {closureMessage}
+                          </div>
+                        )}
+                        <div style={{ marginBottom: 12, fontSize: 13, color: "var(--text)" }}>
+                          Batas konfirmasi: {selectedRequestDetail.confirmation_due_at ?? "Tidak tersedia"}
+                        </div>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          <button
+                            onClick={() => handleConfirmResolution(selectedRequestDetail.id)}
+                            className="btn-primary"
+                            disabled={confirmLoading}
+                            style={{ width: "auto", paddingInline: 20 }}
+                          >
+                            {confirmLoading ? "Memproses..." : "Konfirmasi Selesai"}
+                          </button>
+                          <textarea
+                            value={rejectResolutionReason}
+                            onChange={(e) => setRejectResolutionReason(e.target.value)}
+                            placeholder="Alasan penolakan (minimal 5 karakter)..."
+                            rows={2}
+                            className="form-textarea"
+                            style={{ width: "100%", fontSize: 14, marginTop: 8 }}
+                          />
+                          <button
+                            onClick={() => handleRejectResolution(selectedRequestDetail.id)}
+                            className="btn-logout"
+                            disabled={confirmLoading}
+                            style={{ borderColor: "#ef4444", color: "#ef4444", fontWeight: 600, width: "auto", paddingInline: 20 }}
+                          >
+                            {confirmLoading ? "Memproses..." : "Tolak Hasil"}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Reporter Actions: Edit & Cancel - only for initial statuses */}
+                    {!isEditing && !showCancelModal && ["SUBMITTED", "UNDER_REVIEW", "REJECTED"].includes(selectedRequestDetail.status) && (
+                      <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
+                        <button
+                          onClick={handleStartEdit}
+                          className="btn-primary"
+                          style={{ width: "auto", paddingInline: 20, fontSize: 14 }}
+                        >
+                          ✎ Edit Laporan
+                        </button>
+                        <button
+                          onClick={() => {
+                            setShowCancelModal(true);
+                            setCancelError("");
+                            setCancelSuccess("");
+                            setCancelReason("");
+                          }}
+                          className="btn-logout"
+                          style={{ borderColor: "#ef4444", color: "#ef4444", fontWeight: 600, fontSize: 14 }}
+                        >
+                          ✕ Batalkan Laporan
+                        </button>
+                      </div>
+                    )}
+
+                    <button
+                      onClick={() => { setSelectedRequestDetail(null); setStatusHistory([]); setComments([]); setNewComment(""); setDetailMessage(""); setRejectResolutionReason(""); setClosureMessage(""); resetEditState(); resetCancelState(); }}
+                      className="btn-logout"
+                      style={{ width: "100%" }}
+                    >
+                      Tutup Detail
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </main>
+      )}
+
+      {user.role === "ADMIN" && (
+        <main className="workspace-container">
+          <h1>Layar Kerja Administrator</h1>
+          <p style={{ marginBottom: 32 }}>Kelola antrean review, validasi laporan, dan tugaskan teknisi.</p>
+
+          {adminSuccess && <div className="alert-success">{adminSuccess}</div>}
+          {adminError && <div className="alert-error">{adminError}</div>}
+
+          <div className="flex-container">
+            <div className="flex-main">
+              <h2>Antrean Laporan Masuk</h2>
+              {requests.filter(item => ["SUBMITTED", "UNDER_REVIEW", "REJECTED"].includes(item.status)).length === 0 ? (
+                <div className="placeholder-view">
+                  <p>Tidak ada laporan dalam antrean review saat ini.</p>
+                </div>
+              ) : (
+                <table className="premium-table">
+                  <thead>
+                    <tr>
+                      <th>Nomor</th>
+                      <th>Judul</th>
+                      <th>Lokasi</th>
+                      <th>Kategori</th>
+                      <th>Status</th>
+                      <th>Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {requests.filter(item => ["SUBMITTED", "UNDER_REVIEW", "REJECTED"].includes(item.status)).map((item) => (
+                      <tr key={item.id} style={{ cursor: "pointer" }} onClick={() => {
+                        setSelectedRequest(item);
+                        setRejectionReasonInput("");
+                        setAdminError("");
+                        setAdminSuccess("");
+                      }}>
+                        <td><code>{item.request_number}</code></td>
+                        <td style={{ fontWeight: 600 }}>{item.title}</td>
+                        <td style={{ fontSize: 13 }}>{item.location}</td>
+                        <td>{item.category}</td>
+                        <td>
+                          <span className={`status-indicator ${item.status.toLowerCase() === 'rejected' ? 'progress' : 'submitted'}`} 
+                                style={item.status === 'REJECTED' ? { background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444' } : {}}>
+                            {item.status}
+                          </span>
+                        </td>
+                        <td>
+                          <button className="btn-logout" style={{ padding: "4px 8px", fontSize: 12 }}>Tinjau</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            <div className="flex-side">
+              <h2>Detail Peninjauan</h2>
+              {selectedRequest ? (
+                <div className="premium-card" style={{ maxWidth: "100%", padding: 24, background: "var(--social-bg)" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+                    <code style={{ fontSize: 14 }}>{selectedRequest.request_number}</code>
+                    <span className="role-badge" style={{ fontSize: 11 }}>{selectedRequest.urgency}</span>
+                  </div>
+
+                  <h3 style={{ margin: "0 0 16px", color: "var(--text-h)", fontSize: 20 }}>{selectedRequest.title}</h3>
+
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", textTransform: "uppercase", letterSpacing: 0.5 }}>Lokasi</div>
+                    <div style={{ color: "var(--text-h)", fontSize: 15 }}>{selectedRequest.location}</div>
+                  </div>
+
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", textTransform: "uppercase", letterSpacing: 0.5 }}>Kategori</div>
+                    <div style={{ color: "var(--text-h)", fontSize: 15 }}>{selectedRequest.category}</div>
+                  </div>
+
+                  <div style={{ marginBottom: 20 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", textTransform: "uppercase", letterSpacing: 0.5 }}>Deskripsi</div>
+                    <div style={{ color: "var(--text-h)", fontSize: 14, background: "var(--bg)", padding: 12, borderRadius: 6, border: "1px solid var(--border)", whiteSpace: "pre-line" }}>
+                      {selectedRequest.description}
+                    </div>
+                  </div>
+
+                  {selectedRequest.status === "REJECTED" && (
+                    <div style={{ marginBottom: 20, padding: 12, background: "rgba(239, 68, 68, 0.05)", border: "1px solid rgba(239, 68, 68, 0.2)", borderRadius: 6 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: "#ef4444" }}>ALASAN PENOLAKAN</div>
+                      <div style={{ color: "var(--text-h)", fontSize: 14, marginTop: 4 }}>{selectedRequest.rejection_reason}</div>
+                    </div>
+                  )}
+
+                  {selectedRequest.status !== "REJECTED" ? (
+                    <div>
+                      <div className="form-group">
+                        <label style={{ fontSize: 12 }}>Alasan Penolakan (Wajib jika menolak)</label>
+                        <textarea
+                          placeholder="Tulis alasan mengapa laporan ini tidak valid..."
+                          value={rejectionReasonInput}
+                          onChange={(e) => setRejectionReasonInput(e.target.value)}
+                          rows={3}
+                          className="form-textarea"
+                          style={{ fontSize: 14 }}
+                        />
+                      </div>
+
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                        <button 
+                          onClick={() => handleReject(selectedRequest.id)}
+                          className="btn-logout"
+                          style={{ borderColor: "#ef4444", color: "#ef4444", fontWeight: 600 }}
+                        >
+                          Tolak Laporan
+                        </button>
+                        <button 
+                          className="btn-primary"
+                          disabled
+                          style={{ opacity: 0.5, cursor: "not-allowed", fontSize: 14 }}
+                        >
+                          Tugaskan (Issue 4)
+                        </button>
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
+                        <button
+                          onClick={() => handleAdminClose(selectedRequest.id)}
+                          className="btn-logout"
+                          style={{ fontWeight: 600 }}
+                        >
+                          Tutup Laporan
+                        </button>
+                        {selectedRequest.status === "REOPEN_REQUESTED" && (
+                          <button
+                            onClick={() => handleAdminReopen(selectedRequest.id)}
+                            className="btn-primary"
+                            style={{ width: "auto", paddingInline: 20 }}
+                          >
+                            Buka Ulang Laporan
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <button 
+                      onClick={() => setSelectedRequest(null)}
+                      className="btn-logout"
+                      style={{ width: "100%" }}
+                    >
+                      Tutup Peninjauan
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <p style={{ color: "var(--text)", marginTop: 16 }}>Pilih salah satu laporan di antrean untuk melakukan peninjauan.</p>
+              )}
+            </div>
+          </div>
+        </main>
+      )}
+
+      {user.role === "TECHNICIAN" && (
+        <main className="workspace-container">
+          <h1>Layar Kerja Teknisi</h1>
+          <p>Pantau tugas perbaikan Anda, update progress, dan ubah status.</p>
+
+          <div className="placeholder-view">
+            <h3 style={{ margin: "0 0 8px", color: "var(--text-h)" }}>Daftar Tugas Saya (Assigned Tasks)</h3>
+            <p>Fitur tugas teknisi dan pembaruan progress akan diimplementasikan pada tahap issue berikutnya.</p>
+          </div>
+        </main>
+      )}
+
+      {user.role === "FACILITY_MANAGER" && (
+        <main className="workspace-container">
+          <h1>Dashboard Manajer Fasilitas</h1>
+          <p>Lihat ringkasan statistik fasilitas kampus, unduh laporan, dan berikan catatan.</p>
+
+          <div className="placeholder-view">
+            <h3 style={{ margin: "0 0 8px", color: "var(--text-h)" }}>Analitik & Ringkasan Laporan</h3>
+            <p>Fitur dashboard manajer dan ekspor CSV akan diimplementasikan pada tahap issue berikutnya.</p>
+          </div>
+        </main>
+      )}
+    </div>
+  );
+}
