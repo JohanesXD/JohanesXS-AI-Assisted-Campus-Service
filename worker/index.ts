@@ -30,6 +30,24 @@ async function recordStatusHistory(
   `).bind(id, requestId, fromStatus, toStatus, changedByUserId, reason).run();
 }
 
+async function runAutoClose(env: Env): Promise<void> {
+  const expired = await env.DB.prepare(`
+    SELECT id FROM service_requests
+    WHERE status = 'WAITING_REPORTER_CONFIRMATION'
+    AND confirmation_due_at IS NOT NULL
+    AND datetime(confirmation_due_at) <= datetime('now')
+  `).all<{ id: string }>();
+
+  for (const req of expired.results) {
+    await env.DB.prepare(`
+      UPDATE service_requests
+      SET status = 'CLOSED_AUTO', closed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).bind(req.id).run();
+    await recordStatusHistory(env, req.id, "WAITING_REPORTER_CONFIRMATION", "CLOSED_AUTO", null, "Batas waktu 45 menit konfirmasi telah habis");
+  }
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -106,6 +124,8 @@ export default {
       return json({ error: "Sesi pengguna tidak valid. Silakan login kembali." }, 401);
     }
 
+    await runAutoClose(env);
+
     // Endpoint GET /api/categories
     if (url.pathname === "/api/categories" && request.method === "GET") {
       const result = await env.DB.prepare(`
@@ -175,7 +195,9 @@ export default {
 
       const requestData = await env.DB.prepare(`
         SELECT sr.id, sr.request_number, sr.title, sr.description, sr.status, sr.urgency,
-               sr.rejection_reason, sr.created_at, sr.updated_at,
+               sr.rejection_reason, sr.resolution_rejected_reason,
+               sr.resolved_at, sr.confirmation_due_at, sr.closed_at,
+               sr.created_at, sr.updated_at,
                c.name AS category,
                u.name AS reporter_name, u.campus_email AS reporter_email,
                r.building || ' - ' || r.floor || ' - ' || r.room_name AS location
@@ -290,6 +312,188 @@ export default {
         technicianId: input.technician_id,
         assignmentType: "ADDITIONAL"
       }, 201);
+    }
+
+    // Endpoint POST /api/requests/:id/resolve - Teknisi menyelesaikan pekerjaan
+    const resolveMatch = url.pathname.match(/^\/api\/requests\/([a-zA-Z0-9-]+)\/resolve$/);
+    if (resolveMatch && request.method === "POST") {
+      if (currentUser.role !== "TECHNICIAN") {
+        return json({ error: "Hanya teknisi (TECHNICIAN) yang dapat menyelesaikan pekerjaan." }, 403);
+      }
+
+      const requestId = resolveMatch[1];
+      const checkRequest = await env.DB.prepare(`
+        SELECT id, status FROM service_requests WHERE id = ?
+      `).bind(requestId).first<{ id: string; status: string }>();
+
+      if (!checkRequest) {
+        return json({ error: "Laporan tidak ditemukan." }, 404);
+      }
+
+      if (checkRequest.status !== "IN_PROGRESS") {
+        return json({ error: "Hanya laporan berstatus IN_PROGRESS yang dapat diselesaikan." }, 422);
+      }
+
+      await env.DB.prepare(`
+        UPDATE service_requests
+        SET status = 'WAITING_REPORTER_CONFIRMATION',
+            resolved_at = CURRENT_TIMESTAMP,
+            confirmation_due_at = datetime('now', '+45 minutes'),
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).bind(requestId).run();
+
+      await recordStatusHistory(env, requestId, "IN_PROGRESS", "RESOLVED", currentUser.id, null);
+      await recordStatusHistory(env, requestId, "RESOLVED", "WAITING_REPORTER_CONFIRMATION", null, null);
+
+      return json({ success: true, status: "WAITING_REPORTER_CONFIRMATION" }, 200);
+    }
+
+    // Endpoint POST /api/requests/:id/confirm-resolution - Pelapor konfirmasi selesai
+    const confirmMatch = url.pathname.match(/^\/api\/requests\/([a-zA-Z0-9-]+)\/confirm-resolution$/);
+    if (confirmMatch && request.method === "POST") {
+      if (currentUser.role !== "REPORTER") {
+        return json({ error: "Hanya pelapor (REPORTER) yang dapat mengonfirmasi hasil pekerjaan." }, 403);
+      }
+
+      const requestId = confirmMatch[1];
+      const checkRequest = await env.DB.prepare(`
+        SELECT id, reporter_id, status, confirmation_due_at FROM service_requests WHERE id = ?
+      `).bind(requestId).first<{ id: string; reporter_id: string; status: string; confirmation_due_at: string | null }>();
+
+      if (!checkRequest) {
+        return json({ error: "Laporan tidak ditemukan." }, 404);
+      }
+
+      if (checkRequest.reporter_id !== currentUser.id) {
+        return json({ error: "Anda hanya dapat mengonfirmasi laporan milik sendiri." }, 403);
+      }
+
+      if (checkRequest.status !== "WAITING_REPORTER_CONFIRMATION") {
+        return json({ error: "Laporan tidak dalam status menunggu konfirmasi." }, 422);
+      }
+
+      await env.DB.prepare(`
+        UPDATE service_requests
+        SET status = 'CLOSED_REPORTER_CONFIRMED',
+            closed_at = CURRENT_TIMESTAMP,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).bind(requestId).run();
+
+      await recordStatusHistory(env, requestId, "WAITING_REPORTER_CONFIRMATION", "CLOSED_REPORTER_CONFIRMED", currentUser.id, null);
+
+      return json({ success: true, status: "CLOSED_REPORTER_CONFIRMED" }, 200);
+    }
+
+    // Endpoint POST /api/requests/:id/reject-resolution - Pelapor menolak hasil
+    const rejectResolutionMatch = url.pathname.match(/^\/api\/requests\/([a-zA-Z0-9-]+)\/reject-resolution$/);
+    if (rejectResolutionMatch && request.method === "POST") {
+      if (currentUser.role !== "REPORTER") {
+        return json({ error: "Hanya pelapor (REPORTER) yang dapat menolak hasil pekerjaan." }, 403);
+      }
+
+      const requestId = rejectResolutionMatch[1];
+      const input = await request.json() as { reason?: string };
+
+      if (!input.reason || input.reason.trim().length < 5) {
+        return json({ error: "Alasan penolakan wajib diisi (minimal 5 karakter)." }, 422);
+      }
+
+      const checkRequest = await env.DB.prepare(`
+        SELECT id, reporter_id, status FROM service_requests WHERE id = ?
+      `).bind(requestId).first<{ id: string; reporter_id: string; status: string }>();
+
+      if (!checkRequest) {
+        return json({ error: "Laporan tidak ditemukan." }, 404);
+      }
+
+      if (checkRequest.reporter_id !== currentUser.id) {
+        return json({ error: "Anda hanya dapat menolak hasil laporan milik sendiri." }, 403);
+      }
+
+      if (checkRequest.status !== "WAITING_REPORTER_CONFIRMATION") {
+        return json({ error: "Laporan tidak dalam status menunggu konfirmasi." }, 422);
+      }
+
+      await env.DB.prepare(`
+        UPDATE service_requests
+        SET status = 'REOPEN_REQUESTED',
+            resolution_rejected_reason = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).bind(input.reason.trim(), requestId).run();
+
+      await recordStatusHistory(env, requestId, "WAITING_REPORTER_CONFIRMATION", "REOPEN_REQUESTED", currentUser.id, input.reason.trim());
+
+      return json({ success: true, status: "REOPEN_REQUESTED" }, 200);
+    }
+
+    // Endpoint POST /api/requests/:id/close - Admin menutup laporan
+    const closeMatch = url.pathname.match(/^\/api\/requests\/([a-zA-Z0-9-]+)\/close$/);
+    if (closeMatch && request.method === "POST") {
+      if (currentUser.role !== "ADMIN") {
+        return json({ error: "Hanya administrator (ADMIN) yang dapat menutup laporan." }, 403);
+      }
+
+      const requestId = closeMatch[1];
+      const input = await request.json() as { reason?: string };
+      const checkRequest = await env.DB.prepare(`
+        SELECT id, status FROM service_requests WHERE id = ?
+      `).bind(requestId).first<{ id: string; status: string }>();
+
+      if (!checkRequest) {
+        return json({ error: "Laporan tidak ditemukan." }, 404);
+      }
+
+      const closedStatuses = ["CLOSED_AUTO", "CLOSED_ADMIN", "CLOSED_REPORTER_CONFIRMED"];
+      if (closedStatuses.includes(checkRequest.status)) {
+        return json({ error: "Laporan sudah ditutup." }, 422);
+      }
+
+      await env.DB.prepare(`
+        UPDATE service_requests
+        SET status = 'CLOSED_ADMIN',
+            closed_at = CURRENT_TIMESTAMP,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).bind(requestId).run();
+
+      await recordStatusHistory(env, requestId, checkRequest.status, "CLOSED_ADMIN", currentUser.id, input.reason?.trim() || null);
+
+      return json({ success: true, status: "CLOSED_ADMIN" }, 200);
+    }
+
+    // Endpoint POST /api/requests/:id/reopen - Admin membuka ulang laporan
+    const reopenMatch = url.pathname.match(/^\/api\/requests\/([a-zA-Z0-9-]+)\/reopen$/);
+    if (reopenMatch && request.method === "POST") {
+      if (currentUser.role !== "ADMIN") {
+        return json({ error: "Hanya administrator (ADMIN) yang dapat membuka ulang laporan." }, 403);
+      }
+
+      const requestId = reopenMatch[1];
+      const checkRequest = await env.DB.prepare(`
+        SELECT id, status FROM service_requests WHERE id = ?
+      `).bind(requestId).first<{ id: string; status: string }>();
+
+      if (!checkRequest) {
+        return json({ error: "Laporan tidak ditemukan." }, 404);
+      }
+
+      if (checkRequest.status !== "REOPEN_REQUESTED") {
+        return json({ error: "Hanya laporan berstatus REOPEN_REQUESTED yang dapat dibuka ulang." }, 422);
+      }
+
+      await env.DB.prepare(`
+        UPDATE service_requests
+        SET status = 'REOPENED',
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).bind(requestId).run();
+
+      await recordStatusHistory(env, requestId, "REOPEN_REQUESTED", "REOPENED", currentUser.id, null);
+
+      return json({ success: true, status: "REOPENED" }, 200);
     }
 
     // Endpoint /api/requests

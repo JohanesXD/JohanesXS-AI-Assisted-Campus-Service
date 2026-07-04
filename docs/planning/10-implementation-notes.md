@@ -1,45 +1,44 @@
-# 10 Implementation Notes: FR-08 - Pemantauan Progres dan Komentar oleh Pelapor
+# 10 Implementation Notes: FR-09 - Konfirmasi Hasil Pekerjaan dan Penutupan Laporan
 
 ## Issue
-Closes #8
+Closes #9
 
 ## Requirement
-- **FR:** FR-016 (Pelapor melihat perkembangan laporan), FR-017 (Pelapor memberi komentar tambahan).
-- **AC:** AC-015 (Pelapor dapat melihat status saat ini dan riwayat perpindahan status pada detail laporan), AC-016 (Pelapor dapat menulis komentar baru yang akan langsung muncul pada thread komentar detail laporan).
+- **FR:** FR-018 (Pelapor konfirmasi pekerjaan selesai), FR-019 (Batas 45 menit konfirmasi), FR-020 (Penutupan otomatis 45 menit), FR-021 (Admin menutup laporan), FR-036 (Pelapor menolak hasil, admin buka ulang).
+- **AC:** AC-017 (Pelapor dapat klik Konfirmasi Selesai atau Tolak Hasil dengan alasan), AC-018 (Auto close CLOSED_AUTO setelah 45 menit), AC-019 (Admin dapat buka ulang REOPENED atau tutup paksa CLOSED_ADMIN).
 
 ## Perubahan
-1. **Database Migration (`database/migrations/0007_status_history.sql`)**:
-   - Membuat tabel `request_status_history` untuk menyimpan riwayat perubahan status laporan.
-   - Tabel `request_comments` sudah dibuat oleh migration `0006_comments.sql` (FR-07).
-   - Menambahkan index pada `request_id` dan `created_at` di `request_status_history`.
+1. **Database Migration (`database/migrations/0008_closure.sql`)**:
+   - Menambahkan index `idx_service_requests_confirm_due` untuk query efisien auto-close pada status `WAITING_REPORTER_CONFIRMATION`.
+   - Kolom `resolved_at`, `confirmation_due_at`, `closed_at`, `resolution_rejected_reason` sudah ada dari migration `0003_requests_expand.sql`.
 
 2. **Worker API (`worker/index.ts`)**:
-   - Menambahkan fungsi `recordStatusHistory()` untuk mencatat riwayat status secara konsisten.
-   - **GET `/api/requests/:id`** — Mengembalikan detail laporan lengkap (termasuk kategori, lokasi, pelapor). Reporter hanya bisa melihat laporan miliknya sendiri.
-   - **GET `/api/requests/:id/status-history`** — Mengembalikan riwayat status (timeline) dari awal sampai status terkini.
-   - **GET `/api/requests/:id/comments`** — Mengembalikan daftar komentar pada laporan (diimplementasikan oleh FR-07, endpoint menggunakan schema `content`/`user_id`).
-   - **POST `/api/requests/:id/comments`** — Menambahkan komentar baru (diimplementasikan oleh FR-07, minimal 5 karakter, ID berformat `cmt-`).
-   - Mencatat status history otomatis saat laporan dibuat (`SUBMITTED`) dan saat ditolak (`REJECTED`).
+   - Menambahkan fungsi `runAutoClose()` untuk menutup otomatis laporan yang melebihi 45 menit tanpa konfirmasi.
+   - `runAutoClose()` dipanggil di awal setiap request handler.
+   - **POST `/api/requests/:id/resolve`** — Teknisi menyelesaikan pekerjaan (IN_PROGRESS → RESOLVED → WAITING_REPORTER_CONFIRMATION, set `resolved_at` dan `confirmation_due_at = now + 45 menit`).
+   - **POST `/api/requests/:id/confirm-resolution`** — Pelapor konfirmasi selesai (WAITING_REPORTER_CONFIRMATION → CLOSED_REPORTER_CONFIRMED, set `closed_at`).
+   - **POST `/api/requests/:id/reject-resolution`** — Pelapor tolak hasil dengan alasan (WAITING_REPORTER_CONFIRMATION → REOPEN_REQUESTED, set `resolution_rejected_reason`).
+   - **POST `/api/requests/:id/close`** — Admin tutup laporan (status aktif → CLOSED_ADMIN, set `closed_at`).
+   - **POST `/api/requests/:id/reopen`** — Admin buka ulang (REOPEN_REQUESTED → REOPENED).
+   - Menambahkan `resolved_at`, `confirmation_due_at`, `closed_at`, `resolution_rejected_reason` ke query detail laporan.
 
 3. **Frontend (`src/App.tsx`)**:
-   - Baris laporan pada tabel "Laporan Saya" sekarang dapat diklik untuk membuka panel detail.
-   - Panel detail menampilkan: informasi laporan, riwayat status (timeline visual dengan dot dan garis), thread komentar, dan form input komentar.
-   - Setelah komentar berhasil dikirim, thread komentar diperbarui secara otomatis.
+   - Menambahkan state `rejectResolutionReason`, `closureMessage`, `confirmLoading`.
+   - Menambahkan fungsi `handleConfirmResolution`, `handleRejectResolution`, `handleAdminClose`, `handleAdminReopen`.
+   - Panel detail pelapor: menampilkan panel konfirmasi dengan batas waktu dan tombol "Konfirmasi Selesai" / "Tolak Hasil" saat status `WAITING_REPORTER_CONFIRMATION`.
+   - Panel admin: menambahkan tombol "Tutup Laporan" untuk semua laporan aktif, dan "Buka Ulang Laporan" untuk status `REOPEN_REQUESTED`.
 
-4. **Testing (`tests/unit/comments.test.ts`, `tests/unit/status-history.test.ts`)**:
-   - `comments.test.ts` — 4 test: komentar valid, komentar kosong, komentar spasi, properti tidak ada.
-   - `status-history.test.ts` — 5 test: transisi valid, status tidak dikenal, alasan penolakan, penolakan dengan alasan valid, status kosong.
+4. **Testing (`tests/unit/closure-flow.test.ts`)**:
+   - `closure-flow.test.ts` — 13 test: validasi resolve, konfirmasi, penolakan hasil, penutupan admin, pembukaan ulang.
 
 ## Test
-* [x] Test dijalankan (21 test pass)
+* [x] Test dijalankan (49 test pass, 10 file)
 * [x] Build berhasil
-* [x] Dicoba di browser
 
 ## Penggunaan AI
 * **Skill yang digunakan:** `10-implementation`
-<<<<<<< HEAD
-* **Kesalahan AI yang ditemukan:** Tipe `ServiceRequest` tidak memiliki properti `created_at` sehingga menyebabkan error tsc. Variabel `requestRow` tidak digunakan dan menyebabkan warning.
-* **Perbaikan manusia:** Menambahkan `created_at` dan `updated_at` ke tipe `ServiceRequest`, menghapus variabel `requestRow` yang tidak terpakai.
+* **Kesalahan AI yang ditemukan:** -
+* **Perbaikan manusia:** -
 
 ## Reviewer
 * **Nama:** JohanesXD
