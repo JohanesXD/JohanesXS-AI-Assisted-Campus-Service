@@ -76,7 +76,7 @@ async function notifyStatusChange(
   const technicians = await env.DB.prepare(`
     SELECT technician_id FROM request_assignments
     WHERE request_id = ? AND status = 'ACTIVE'
-  `).all<{ technician_id: string }>();
+  `).bind(requestId).all<{ technician_id: string }>();
 
   const reporterId = requestInfo.reporter_id;
 
