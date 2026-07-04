@@ -1,90 +1,96 @@
-# Implementation Notes — FR-11: Perubahan dan Pembatalan Laporan oleh Pelapor
+# Implementation Notes — FR-12: Advanced Admin Actions
 
 ## Issue
-- GitHub Issue: #34
-- Requirements: FR-031, FR-032, FR-033, FR-034
-- User Story: US-015
-- Acceptance Criteria: AC-022, AC-023
+- GitHub Issue: #12
+- Requirements: FR-038, FR-039, FR-040
+- User Story: US-017
+- Acceptance Criteria: AC-024, AC-025
 
 ## Ringkasan Perubahan
-Implementasi fitur yang mengizinkan pelapor untuk mengubah atau membatalkan laporan yang sudah dikirim, dengan alasan perubahan/pembatalan yang tercatat di sistem.
+Implementasi fitur administrasi lanjutan yang mengizinkan administrator mengedit detail laporan (kategori, lokasi, deskripsi) dengan alasan perubahan wajib, menggabungkan laporan duplikat ke laporan utama, mengajukan penggantian teknisi utama (reassignment) dengan alasan, serta alur persetujuan ganda (dual-approval) dari teknisi lama & baru.
 
 ## Backend Changes
 
-### 1. Database Migration (`database/migrations/0010_request_edits.sql`)
-- Tabel `request_edits` untuk menyimpan riwayat perubahan laporan
-- Kolom: id, request_id, edited_by_user_id, old/new title, description, category_id, room_id, urgency, reason, created_at
-- Index pada request_id dan created_at
+### 1. Database Migration (`database/migrations/0012_admin_management.sql`)
+- Menambahkan kolom `duplicate_of_id` (TEXT) ke tabel `service_requests` sebagai referensi silang ke laporan utama jika ditandai sebagai duplikat.
 
 ### 2. API Endpoints (`worker/index.ts`)
 
-#### PATCH /api/requests/:id — Edit Laporan (FR-031, AC-023)
-- **Auth**: Hanya REPORTER
-- **Validasi**: 
-  - Laporan harus milik pelapor (reporter_id === currentUser.id)
-  - Status harus SUBMITTED, UNDER_REVIEW, atau REJECTED
-  - Alasan perubahan wajib diisi (minimal 5 karakter)
-  - Judul tidak boleh kosong, deskripsi minimal 20 karakter
-- **Proses**:
-  - Update field yang diubah (title, description, category_id, room_id, urgency)
-  - Reset status ke UNDER_REVIEW
-  - Hapus rejection_reason jika sebelumnya REJECTED
-  - Simpan riwayat perubahan ke tabel `request_edits`
-  - Catat perubahan status di `request_status_history`
-  - Kirim notifikasi "EDITED" ke semua admin
-
-#### POST /api/requests/:id/cancel — Batalkan Laporan (FR-034, AC-022)
-- **Auth**: Hanya REPORTER
+#### PATCH /api/admin/requests/:id/edit — Admin Edit Laporan (FR-038)
+- **Auth**: Hanya ADMIN
 - **Validasi**:
-  - Laporan harus milik pelapor
-  - Status harus SUBMITTED, UNDER_REVIEW, atau REJECTED
-  - Alasan pembatalan wajib diisi (minimal 5 karakter)
+  - Alasan perubahan wajib diisi (minimal 5 karakter).
+  - Deskripsi minimal 20 karakter jika diubah.
 - **Proses**:
-  - Update status ke CANCELLED
-  - Catat perubahan status di `request_status_history` dengan alasan
-  - Kirim notifikasi "CANCELLED" ke semua admin
+  - Memperbarui `category_id`, `room_id`, dan `description` di tabel `service_requests`.
+  - Mencatat alasan perubahan di tabel `request_edits`.
+  - Mencatat perpindahan status ke riwayat.
 
-#### Notifikasi
-- Ditambahkan case "EDITED" di `notifyStatusChange` untuk mengirim notifikasi ke admin saat pelapor mengubah laporan
+#### POST /api/admin/requests/:id/merge — Gabungkan Duplikat (FR-039, AC-024)
+- **Auth**: Hanya ADMIN
+- **Validasi**:
+  - `main_request_id` wajib diisi dan harus merujuk laporan aktif yang valid.
+  - Laporan duplikat tidak boleh dalam status tertutup atau digabungkan sebelumnya.
+- **Proses**:
+  - Memperbarui `status` laporan duplikat menjadi `MERGED` dan mengeset `duplicate_of_id` ke id laporan utama.
+  - Menambahkan komentar otomatis silang di kedua laporan yang menginformasikan penggabungan tersebut.
+
+#### POST /api/admin/requests/:id/reassign — Ajukan Reassign Teknisi (FR-040, AC-025)
+- **Auth**: Hanya ADMIN
+- **Validasi**:
+  - `new_technician_id` harus terdaftar sebagai teknisi aktif.
+  - Harus ada teknisi utama aktif saat ini pada laporan tersebut.
+  - Tidak boleh ada pengajuan reassignment tertunda untuk laporan tersebut.
+- **Proses**:
+  - Membuat assignment baru di tabel `request_assignments` dengan tipe `PRIMARY`, status `REPLACEMENT_PENDING`, dan merekam `technician_id` teknisi baru serta alasan reassign.
+  - Mengirim notifikasi perubahan status kepada teknisi lama dan baru.
+
+#### POST /api/requests/:id/reassign/approve — Persetujuan Teknisi (FR-040, AC-025)
+- **Auth**: Hanya TECHNICIAN (lama atau baru)
+- **Validasi**:
+  - Harus ada pengajuan reassign yang sedang tertunda (`REPLACEMENT_PENDING`).
+  - Pengguna yang masuk harus merupakan salah satu dari teknisi lama atau baru.
+- **Proses**:
+  - Jika menolak (`approve: false`), status pengajuan diset `DECLINED` dan admin menerima notifikasi penolakan.
+  - Jika menyetujui (`approve: true`), mengupdate timestamp persetujuan bersangkutan (`old_technician_approved_at` atau `new_technician_approved_at`).
+  - Jika kedua teknisi telah menyetujui, menonaktifkan assignment lama (`REPLACED`) dan mengaktifkan assignment baru (`ACTIVE`), memperbarui status laporan menjadi `ASSIGNED`, serta mencatat di riwayat status.
 
 ## Frontend Changes (`src/App.tsx`)
 
 ### State Baru
-- `isEditing`, `editTitle`, `editDescription`, `editCategoryId`, `editBuilding`, `editFloor`, `editRoomId`, `editUrgency`, `editReason`, `editError`, `editSuccess`
-- `showCancelModal`, `cancelReason`, `cancelError`, `cancelSuccess`
+- `isAdminEditing`, `adminEditCategoryId`, `adminEditRoomId`, `adminEditDescription`, `adminEditReason`
+- `showMergeModal`, `mergeTargetRequestId`
+- `showReassignModal`, `reassignTechnicianId`, `reassignReason`
 
 ### Fungsi Baru
-- `handleStartEdit()` — Mengisi form edit dari data laporan yang dipilih
-- `handleEditSubmit(requestId)` — Mengirim PATCH ke API
-- `handleCancelSubmit(requestId)` — Mengirim POST cancel ke API
-- `resetEditState()` — Reset semua state edit
-- `resetCancelState()` — Reset semua state cancel
+- `handleAdminEditSubmit(requestId)` — Mengirim data edit admin ke backend.
+- `handleAdminMergeSubmit(requestId)` — Mengirim perintah merge laporan duplikat.
+- `handleAdminReassignSubmit(requestId)` — Mengirim pengajuan reassignment teknisi.
+- `handleTechReassignDecision(requestId, approved)` — Mengirim keputusan persetujuan/penolakan reassignment teknisi.
 
 ### UI Baru
-- Tombol "✎ Edit Laporan" dan "✕ Batalkan Laporan" muncul hanya untuk status SUBMITTED, UNDER_REVIEW, REJECTED
-- Form edit dengan field: judul, deskripsi, lokasi bertingkat (gedung/lantai/ruangan), kategori, urgensi, alasan perubahan
-- Modal konfirmasi pembatalan dengan input alasan
+- Pilihan Tab Administrator: "Antrean Review" vs "Semua Laporan".
+- Form Edit Laporan untuk Admin jika laporan berstatus `SUBMITTED` or `UNDER_REVIEW`.
+- Dropdown penugasan teknisi utama pertama kali.
+- Tombol "Merge Duplikat" dan "Ganti Teknisi" pada detail laporan admin.
+- Panel persetujuan reassignment di layar kerja detail tugas teknisi.
 
-## Test (`tests/unit/reporter-edit-cancel.test.ts`)
-- 11 test case untuk validasi edit
-- 9 test case untuk validasi cancel
-- 2 test case untuk transisi status
+## Test (`tests/unit/admin-advanced.test.ts`)
+- Pengujian API Edit Detail Laporan oleh Admin beserta validasi panjang alasan.
+- Pengujian API Penggabungan Laporan Duplikat ke laporan utama.
+- Pengujian API Pengajuan Reassignment Teknisi.
+- Pengujian API Persetujuan Bersama (*dual-approval*) hingga assignment aktif.
 
 ## Acceptance Criteria Coverage
 
 | AC | Status | Keterangan |
 |----|--------|------------|
-| AC-022 | ✅ | Pelapor dapat membatalkan laporan berstatus awal dengan alasan |
-| AC-023 | ✅ | Pelapor dapat mengubah laporan, sistem mencatat alasan, mengembalikan status ke UNDER_REVIEW, dan mengirim notifikasi ke admin |
+| AC-024 | ✅ | Admin dapat menggabungkan laporan duplikat ke laporan utama. |
+| AC-025 | ✅ | Penggantian teknisi membutuhkan persetujuan teknisi lama & baru sebelum aktif. |
 
 ## Checklist Pekerjaan
-- [x] Buat form edit laporan dan tombol batalkan laporan bagi Pelapor
-- [x] Buat API edit (PATCH /api/requests/:id) dan batalkan (POST /api/requests/:id/cancel)
-- [x] Simpan riwayat perubahan di database (request_edits dan status_history)
-- [x] Buat integration test untuk validasi alur pembatalan dan review admin setelah edit
-- [ ] Update traceability matrix (dilakukan di PR review)
-
-## Asumsi
-- ASUMSI: Pelapor hanya bisa edit/cancel laporan milik sendiri
-- ASUMSI: Edit mengembalikan status ke UNDER_REVIEW agar admin meninjau ulang
-- ASUMSI: Cancel langsung mengubah status ke CANCELLED tanpa perlu persetujuan admin
+- [x] Buat form edit admin, dialog merge duplikat, dan UI penggantian teknisi
+- [x] Buat API merge, edit admin, dan ganti teknisi
+- [x] Simpan persetujuan teknisi lama/baru di database D1
+- [x] Buat integration/unit test untuk alur persetujuan penggantian teknisi dan penggabungan duplikat
+- [x] Update traceability matrix
