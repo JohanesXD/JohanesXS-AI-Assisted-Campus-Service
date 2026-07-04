@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 describe("Validasi Penugasan Teknisi Tambahan", () => {
   it("menolak penugasan tanpa technician_id", () => {
     const input = { technician_id: "", reason: "Bantuan diperlukan" };
-    const isValid = input.technician_id && input.technician_id.trim().length > 0;
+    const isValid = !!(input.technician_id && input.technician_id.trim().length > 0);
     expect(isValid).toBe(false);
   });
 
