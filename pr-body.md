@@ -1,25 +1,31 @@
 ## Issue
-Closes #8
+Closes #10
 
 ## Requirement
-FR-016: Sistem harus mengizinkan pelapor melihat perkembangan laporan.
-FR-017: Sistem harus mengizinkan pelapor memberi komentar tambahan setelah laporan dibuat.
+FR-022: Sistem harus mengirim notifikasi melalui aplikasi saat status laporan berubah pada kondisi yang ditentukan.
+FR-023: Sistem harus mengirim notifikasi aplikasi saat masalah sudah ditangani, membutuhkan suku cadang baru, teknisi butuh bantuan, dan pekerjaan terjeda.
+FR-037: Sistem harus menyediakan riwayat notifikasi dan status notifikasi sudah dibaca.
 
 ## Acceptance Criteria
-- AC-015: Pelapor dapat melihat status saat ini dan riwayat perpindahan status (timeline) pada detail laporan.
-- AC-016: Pelapor dapat menulis komentar baru yang akan langsung muncul pada thread komentar detail laporan.
+- AC-020: Setiap perubahan status yang memicu notifikasi akan dicatat ke dalam database notifikasi penerima.
+- AC-021: Pengguna memiliki panel notifikasi untuk melihat daftar notifikasi dan menandai notifikasi sebagai sudah dibaca (read_at terisi).
 
 ## Perubahan
-- Migration 0004: tabel request_status_history & request_comments
-- Worker: GET/POST comments, GET status-history, GET request detail, recordStatusHistory helper
-- Frontend: panel detail laporan dengan timeline & thread komentar
-- Tests: 9 test baru (comments + status-history)
+- Migration 0009: tabel notifications
+- Worker: GET /api/notifications, POST /api/notifications/:id/read, helper createNotification, trigger pada setiap perubahan status
+- Frontend: icon bell dengan badge di header, dropdown notifikasi, tombol mark-as-read
+- Tests: 12 test baru (notification creation, read flow, recipient determination)
 
 ## Test
-- [x] Test dijalankan (21 tests pass)
-- [x] Build berhasil
+- [ ] Test dijalankan
+- [ ] Build berhasil
+- [ ] Dicoba di browser
 
 ## Penggunaan AI
 Skill yang digunakan: 10-implementation
-Kesalahan AI yang ditemukan: Missing created_at property in ServiceRequest type, unused variable requestRow
-Perbaikan manusia: Fixed type definition and removed unused variable
+Kesalahan AI yang ditemukan: -
+Perbaikan manusia: -
+
+## Reviewer
+Nama:
+Keputusan:
