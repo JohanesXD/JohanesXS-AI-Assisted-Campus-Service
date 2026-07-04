@@ -124,6 +124,51 @@ export default function App() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [showNotifications, setShowNotifications] = useState(false);
 
+  // Facility Manager states (Issue 13 & 14)
+  const [groupedRooms, setGroupedRooms] = useState<Record<string, Record<string, Room[]>>>({});
+  const [roomBuildingInput, setRoomBuildingInput] = useState("");
+  const [roomFloorInput, setRoomFloorInput] = useState("");
+  const [roomNameInput, setRoomNameInput] = useState("");
+  const [roomError, setRoomError] = useState("");
+  const [roomSuccess, setRoomSuccess] = useState("");
+  const [activeTab, setActiveTab] = useState("DASHBOARD");
+
+  const [fmStats, setFmStats] = useState<{ total_solved: number; category_chart: { category_name: string; count: number }[] } | null>(null);
+  const [fmSummary, setFmSummary] = useState<any[]>([]);
+  const [fmFilterCategory, setFmFilterCategory] = useState("");
+  const [fmFilterRoom, setFmFilterRoom] = useState("");
+  const [fmFilterStartDate, setFmFilterStartDate] = useState("");
+  const [fmFilterEndDate, setFmFilterEndDate] = useState("");
+  const [fmSort, setFmSort] = useState("newest");
+  const [selectedFmReport, setSelectedFmReport] = useState<any>(null);
+  const [fmNoteInput, setFmNoteInput] = useState("");
+  const [fmNoteReasonInput, setFmNoteReasonInput] = useState("");
+  const [fmError, setFmError] = useState("");
+  const [fmSuccess, setFmSuccess] = useState("");
+
+  // Admin Advanced actions states (Issue 12)
+  const [isAdminEditing, setIsAdminEditing] = useState(false);
+  const [adminEditCategoryId, setAdminEditCategoryId] = useState("");
+  const [adminEditRoomId, setAdminEditRoomId] = useState("");
+  const [adminEditDescription, setAdminEditDescription] = useState("");
+  const [adminEditReason, setAdminEditReason] = useState("");
+  const [adminEditError, setAdminEditError] = useState("");
+  const [adminEditSuccess, setAdminEditSuccess] = useState("");
+
+  const [showMergeModal, setShowMergeModal] = useState(false);
+  const [mergeTargetRequestId, setMergeTargetRequestId] = useState("");
+  const [mergeError, setMergeError] = useState("");
+  const [mergeSuccess, setMergeSuccess] = useState("");
+
+  const [showReassignModal, setShowReassignModal] = useState(false);
+  const [reassignTechnicianId, setReassignTechnicianId] = useState("");
+  const [reassignReason, setReassignReason] = useState("");
+  const [reassignError, setReassignError] = useState("");
+  const [reassignSuccess, setReassignSuccess] = useState("");
+
+  const [techniciansList, setTechniciansList] = useState<any[]>([]);
+  const [selectedTechId, setSelectedTechId] = useState("");
+
   async function fetchNotifications() {
     if (!user) return;
     try {
@@ -199,14 +244,28 @@ export default function App() {
   // Load requests and metadata on login
   useEffect(() => {
     if (user) {
-      if (["REPORTER", "ADMIN"].includes(user.role)) {
+      if (["REPORTER", "ADMIN", "TECHNICIAN"].includes(user.role)) {
         loadRequests();
       }
-      if (user.role === "REPORTER") {
+      if (["REPORTER", "ADMIN", "FACILITY_MANAGER"].includes(user.role)) {
         loadMetadata();
+      }
+      if (user.role === "ADMIN") {
+        loadTechnicians();
+      }
+      if (user.role === "FACILITY_MANAGER") {
+        loadGroupedRooms();
+        loadFmStats();
+        loadFmSummary();
       }
     }
   }, [user]);
+
+  useEffect(() => {
+    if (user && user.role === "FACILITY_MANAGER") {
+      loadFmSummary();
+    }
+  }, [fmFilterCategory, fmFilterRoom, fmFilterStartDate, fmFilterEndDate, fmSort]);
 
   async function loadMetadata() {
     if (!user) return;
@@ -288,6 +347,380 @@ export default function App() {
       setRequests(result.data ?? []);
     } catch (e) {
       console.error("Gagal memuat laporan", e);
+    }
+  }
+
+  async function loadTechnicians() {
+    if (!user) return;
+    try {
+      const res = await fetch("/api/users/technicians", {
+        headers: { "X-User-Email": user.campus_email, "X-User-Role": user.role }
+      });
+      const data = await res.json();
+      if (data.data) {
+        setTechniciansList(data.data);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  async function loadGroupedRooms() {
+    if (!user) return;
+    try {
+      const res = await fetch("/api/rooms/grouped", {
+        headers: { "X-User-Email": user.campus_email, "X-User-Role": user.role }
+      });
+      const data = await res.json();
+      if (data.data) {
+        setGroupedRooms(data.data);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  async function loadFmStats() {
+    if (!user) return;
+    try {
+      const res = await fetch("/api/reports/stats", {
+        headers: { "X-User-Email": user.campus_email, "X-User-Role": user.role }
+      });
+      const data = await res.json();
+      if (data.success) {
+        setFmStats({
+          total_solved: data.total_solved,
+          category_chart: data.category_chart
+        });
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  async function loadFmSummary() {
+    if (!user) return;
+    try {
+      let urlStr = "/api/reports/summary?";
+      if (fmFilterCategory) urlStr += `category_id=${fmFilterCategory}&`;
+      if (fmFilterRoom) urlStr += `room_id=${fmFilterRoom}&`;
+      if (fmFilterStartDate) urlStr += `start_date=${fmFilterStartDate}&`;
+      if (fmFilterEndDate) urlStr += `end_date=${fmFilterEndDate}&`;
+      urlStr += `sort=${fmSort}`;
+
+      const res = await fetch(urlStr, {
+        headers: { "X-User-Email": user.campus_email, "X-User-Role": user.role }
+      });
+      const data = await res.json();
+      if (data.success) {
+        setFmSummary(data.data);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  async function handleAddFmFollowUp(event: React.FormEvent) {
+    event.preventDefault();
+    if (!user || !selectedFmReport) return;
+
+    setFmError("");
+    setFmSuccess("");
+
+    if (!fmNoteInput.trim()) {
+      setFmError("Catatan tindak lanjut wajib diisi.");
+      return;
+    }
+
+    if (!fmNoteReasonInput.trim() || fmNoteReasonInput.trim().length < 5) {
+      setFmError("Alasan wajib diisi (minimal 5 karakter).");
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/reports/${selectedFmReport.id}/follow-up`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-User-Email": user.campus_email,
+          "X-User-Role": user.role
+        },
+        body: JSON.stringify({
+          note: fmNoteInput,
+          reason: fmNoteReasonInput
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setFmSuccess("Catatan tindak lanjut berhasil disimpan.");
+        setFmNoteInput("");
+        setFmNoteReasonInput("");
+        setSelectedFmReport(null);
+        loadFmSummary();
+      } else {
+        setFmError(data.error || "Gagal menyimpan catatan.");
+      }
+    } catch (e) {
+      setFmError("Koneksi terputus.");
+    }
+  }
+
+  async function handleAddRoom(event: React.FormEvent) {
+    event.preventDefault();
+    if (!user) return;
+
+    setRoomError("");
+    setRoomSuccess("");
+
+    if (!roomBuildingInput.trim()) {
+      setRoomError("Nama gedung wajib diisi.");
+      return;
+    }
+    if (!roomFloorInput.trim()) {
+      setRoomError("Nama lantai wajib diisi.");
+      return;
+    }
+    if (!roomNameInput.trim()) {
+      setRoomError("Nama ruangan wajib diisi.");
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/rooms", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-User-Email": user.campus_email,
+          "X-User-Role": user.role
+        },
+        body: JSON.stringify({
+          building: roomBuildingInput,
+          floor: roomFloorInput,
+          room_name: roomNameInput
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setRoomSuccess("Ruangan baru berhasil ditambahkan.");
+        setRoomBuildingInput("");
+        setRoomFloorInput("");
+        setRoomNameInput("");
+        loadGroupedRooms();
+        loadMetadata();
+      } else {
+        setRoomError(data.error || "Gagal menambahkan ruangan.");
+      }
+    } catch (e) {
+      setRoomError("Koneksi terputus.");
+    }
+  }
+
+  async function handleDeactivateRoom(roomId: string) {
+    if (!user || !window.confirm("Apakah Anda yakin ingin menonaktifkan ruangan ini?")) return;
+    setRoomError("");
+    setRoomSuccess("");
+
+    try {
+      const res = await fetch(`/api/rooms/${roomId}`, {
+        method: "DELETE",
+        headers: {
+          "X-User-Email": user.campus_email,
+          "X-User-Role": user.role
+        }
+      });
+      const data = await res.json();
+      if (data.success) {
+        setRoomSuccess("Ruangan berhasil dinonaktifkan.");
+        loadGroupedRooms();
+        loadMetadata();
+      } else {
+        setRoomError(data.error || "Gagal menonaktifkan ruangan.");
+      }
+    } catch (e) {
+      setRoomError("Koneksi terputus.");
+    }
+  }
+
+  async function handleAdminEditSubmit(requestId: string) {
+    if (!user) return;
+    setAdminError("");
+    setAdminSuccess("");
+
+    if (!adminEditReason.trim() || adminEditReason.trim().length < 5) {
+      setAdminError("Alasan perubahan wajib diisi (minimal 5 karakter).");
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/admin/requests/${requestId}/edit`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "X-User-Email": user.campus_email,
+          "X-User-Role": user.role
+        },
+        body: JSON.stringify({
+          category_id: adminEditCategoryId,
+          room_id: adminEditRoomId,
+          description: adminEditDescription,
+          reason: adminEditReason
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setAdminSuccess("Laporan berhasil diperbarui oleh administrator.");
+        setIsAdminEditing(false);
+        setAdminEditReason("");
+        loadRequests();
+        setSelectedRequest(null);
+      } else {
+        setAdminError(data.error || "Gagal memperbarui laporan.");
+      }
+    } catch (e) {
+      setAdminError("Koneksi terputus.");
+    }
+  }
+
+  async function handleAdminMergeSubmit(requestId: string) {
+    if (!user) return;
+    setAdminError("");
+    setAdminSuccess("");
+
+    if (!mergeTargetRequestId) {
+      setAdminError("Laporan utama wajib dipilih.");
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/admin/requests/${requestId}/merge`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-User-Email": user.campus_email,
+          "X-User-Role": user.role
+        },
+        body: JSON.stringify({
+          main_request_id: mergeTargetRequestId
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setAdminSuccess("Laporan duplikat berhasil digabungkan.");
+        setShowMergeModal(false);
+        setMergeTargetRequestId("");
+        setSelectedRequest(null);
+        loadRequests();
+      } else {
+        setAdminError(data.error || "Gagal menggabungkan laporan.");
+      }
+    } catch (e) {
+      setAdminError("Koneksi terputus.");
+    }
+  }
+
+  async function handleAdminReassignSubmit(requestId: string) {
+    if (!user) return;
+    setAdminError("");
+    setAdminSuccess("");
+
+    if (!reassignTechnicianId) {
+      setAdminError("Teknisi baru wajib dipilih.");
+      return;
+    }
+
+    if (!reassignReason.trim() || reassignReason.trim().length < 5) {
+      setAdminError("Alasan penggantian wajib diisi (minimal 5 karakter).");
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/admin/requests/${requestId}/reassign`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-User-Email": user.campus_email,
+          "X-User-Role": user.role
+        },
+        body: JSON.stringify({
+          new_technician_id: reassignTechnicianId,
+          reason: reassignReason
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setAdminSuccess("Pengajuan penggantian teknisi berhasil dikirim.");
+        setShowReassignModal(false);
+        setReassignTechnicianId("");
+        setReassignReason("");
+        setSelectedRequest(null);
+        loadRequests();
+      } else {
+        setAdminError(data.error || "Gagal mengajukan penggantian.");
+      }
+    } catch (e) {
+      setAdminError("Koneksi terputus.");
+    }
+  }
+
+  async function handleAdminAssignSubmit(requestId: string, techId: string) {
+    if (!user) return;
+    setAdminError("");
+    setAdminSuccess("");
+
+    if (!techId) {
+      setAdminError("Teknisi wajib dipilih.");
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/requests/${requestId}/assign`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-User-Email": user.campus_email,
+          "X-User-Role": user.role
+        },
+        body: JSON.stringify({
+          technician_id: techId
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setAdminSuccess("Teknisi berhasil ditugaskan.");
+        setSelectedRequest(null);
+        loadRequests();
+      } else {
+        setAdminError(data.error || "Gagal menugaskan teknisi.");
+      }
+    } catch (e) {
+      setAdminError("Koneksi terputus.");
+    }
+  }
+
+  async function handleTechReassignDecision(requestId: string, approve: boolean) {
+    if (!user) return;
+    try {
+      const res = await fetch(`/api/requests/${requestId}/reassign/approve`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-User-Email": user.campus_email,
+          "X-User-Role": user.role
+        },
+        body: JSON.stringify({
+          approve: approve
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert(data.message);
+        loadRequests();
+        setSelectedRequestDetail(null);
+      } else {
+        alert(data.error || "Gagal memproses keputusan.");
+      }
+    } catch (e) {
+      alert("Koneksi terputus.");
     }
   }
 
@@ -1439,17 +1872,37 @@ export default function App() {
       {user.role === "ADMIN" && (
         <main className="workspace-container">
           <h1>Layar Kerja Administrator</h1>
-          <p style={{ marginBottom: 32 }}>Kelola antrean review, validasi laporan, dan tugaskan teknisi.</p>
+          <p style={{ marginBottom: 20 }}>Kelola antrean review, validasi laporan, dan tugaskan teknisi.</p>
+
+          <div style={{ display: "flex", gap: 12, marginBottom: 24 }}>
+            <button
+              onClick={() => { setActiveTab("REVIEW"); setSelectedRequest(null); }}
+              className={`btn-primary`}
+              style={{ width: "auto", paddingInline: 20, background: activeTab === "REVIEW" ? "var(--text-h)" : "var(--social-bg)", color: activeTab === "REVIEW" ? "#fff" : "var(--text)" }}
+            >
+              Antrean Review
+            </button>
+            <button
+              onClick={() => { setActiveTab("ALL"); setSelectedRequest(null); }}
+              className={`btn-primary`}
+              style={{ width: "auto", paddingInline: 20, background: activeTab === "ALL" ? "var(--text-h)" : "var(--social-bg)", color: activeTab === "ALL" ? "#fff" : "var(--text)" }}
+            >
+              Semua Laporan
+            </button>
+          </div>
 
           {adminSuccess && <div className="alert-success">{adminSuccess}</div>}
           {adminError && <div className="alert-error">{adminError}</div>}
 
           <div className="flex-container">
             <div className="flex-main">
-              <h2>Antrean Laporan Masuk</h2>
-              {requests.filter(item => ["SUBMITTED", "UNDER_REVIEW", "REJECTED"].includes(item.status)).length === 0 ? (
+              <h2>{activeTab === "ALL" ? "Daftar Semua Laporan" : "Antrean Laporan Masuk"}</h2>
+              {(activeTab === "ALL" 
+                ? requests 
+                : requests.filter(item => ["SUBMITTED", "UNDER_REVIEW", "REOPEN_REQUESTED", "REJECTED"].includes(item.status))
+              ).length === 0 ? (
                 <div className="placeholder-view">
-                  <p>Tidak ada laporan dalam antrean review saat ini.</p>
+                  <p>Tidak ada laporan dalam antrean saat ini.</p>
                 </div>
               ) : (
                 <table className="premium-table">
@@ -1464,12 +1917,23 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody>
-                    {requests.filter(item => ["SUBMITTED", "UNDER_REVIEW", "REJECTED"].includes(item.status)).map((item) => (
+                    {(activeTab === "ALL" 
+                      ? requests 
+                      : requests.filter(item => ["SUBMITTED", "UNDER_REVIEW", "REOPEN_REQUESTED", "REJECTED"].includes(item.status))
+                    ).map((item) => (
                       <tr key={item.id} style={{ cursor: "pointer" }} onClick={() => {
                         setSelectedRequest(item);
                         setRejectionReasonInput("");
                         setAdminError("");
                         setAdminSuccess("");
+                        setIsAdminEditing(false);
+                        setShowMergeModal(false);
+                        setShowReassignModal(false);
+                        // Populate admin edit values
+                        setAdminEditCategoryId(item.category_id || "");
+                        setAdminEditRoomId(item.room_id || "");
+                        setAdminEditDescription(item.description || "");
+                        setAdminEditReason("");
                       }}>
                         <td><code>{item.request_number}</code></td>
                         <td style={{ fontWeight: 600 }}>{item.title}</td>
@@ -1500,89 +1964,301 @@ export default function App() {
                     <span className="role-badge" style={{ fontSize: 11 }}>{selectedRequest.urgency}</span>
                   </div>
 
-                  <h3 style={{ margin: "0 0 16px", color: "var(--text-h)", fontSize: 20 }}>{selectedRequest.title}</h3>
-
-                  <div style={{ marginBottom: 16 }}>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", textTransform: "uppercase", letterSpacing: 0.5 }}>Lokasi</div>
-                    <div style={{ color: "var(--text-h)", fontSize: 15 }}>{selectedRequest.location}</div>
-                  </div>
-
-                  <div style={{ marginBottom: 16 }}>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", textTransform: "uppercase", letterSpacing: 0.5 }}>Kategori</div>
-                    <div style={{ color: "var(--text-h)", fontSize: 15 }}>{selectedRequest.category}</div>
-                  </div>
-
-                  <div style={{ marginBottom: 20 }}>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", textTransform: "uppercase", letterSpacing: 0.5 }}>Deskripsi</div>
-                    <div style={{ color: "var(--text-h)", fontSize: 14, background: "var(--bg)", padding: 12, borderRadius: 6, border: "1px solid var(--border)", whiteSpace: "pre-line" }}>
-                      {selectedRequest.description}
-                    </div>
-                  </div>
-
-                  {selectedRequest.status === "REJECTED" && (
-                    <div style={{ marginBottom: 20, padding: 12, background: "rgba(239, 68, 68, 0.05)", border: "1px solid rgba(239, 68, 68, 0.2)", borderRadius: 6 }}>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: "#ef4444" }}>ALASAN PENOLAKAN</div>
-                      <div style={{ color: "var(--text-h)", fontSize: 14, marginTop: 4 }}>{selectedRequest.rejection_reason}</div>
-                    </div>
-                  )}
-
-                  {selectedRequest.status !== "REJECTED" ? (
-                    <div>
+                  {/* ADMIN EDIT MODE */}
+                  {isAdminEditing ? (
+                    <div style={{ marginBottom: 20 }}>
+                      <h3 style={{ margin: "0 0 16px", color: "var(--text-h)", fontSize: 18 }}>Edit Detail Laporan</h3>
                       <div className="form-group">
-                        <label style={{ fontSize: 12 }}>Alasan Penolakan (Wajib jika menolak)</label>
+                        <label>Kategori</label>
+                        <select
+                          value={adminEditCategoryId}
+                          onChange={(e) => setAdminEditCategoryId(e.target.value)}
+                          className="form-select"
+                        >
+                          {categoriesList.map(c => (
+                            <option key={c.id} value={c.id}>{c.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="form-group">
+                        <label>Ruangan</label>
+                        <select
+                          value={adminEditRoomId}
+                          onChange={(e) => setAdminEditRoomId(e.target.value)}
+                          className="form-select"
+                        >
+                          {roomsList.map(r => (
+                            <option key={r.id} value={r.id}>{r.building} - {r.floor} - {r.room_name}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="form-group">
+                        <label>Deskripsi (min 20 karakter)</label>
                         <textarea
-                          placeholder="Tulis alasan mengapa laporan ini tidak valid..."
-                          value={rejectionReasonInput}
-                          onChange={(e) => setRejectionReasonInput(e.target.value)}
-                          rows={3}
+                          value={adminEditDescription}
+                          onChange={(e) => setAdminEditDescription(e.target.value)}
+                          rows={4}
                           className="form-textarea"
-                          style={{ fontSize: 14 }}
                         />
                       </div>
-
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                        <button 
-                          onClick={() => handleReject(selectedRequest.id)}
-                          className="btn-logout"
-                          style={{ borderColor: "#ef4444", color: "#ef4444", fontWeight: 600 }}
-                        >
-                          Tolak Laporan
-                        </button>
-                        <button 
+                      <div className="form-group">
+                        <label>Alasan Perubahan (wajib, min 5 karakter)</label>
+                        <input
+                          type="text"
+                          value={adminEditReason}
+                          onChange={(e) => setAdminEditReason(e.target.value)}
+                          placeholder="Masukkan alasan Anda..."
+                          className="form-input"
+                        />
+                      </div>
+                      <div style={{ display: "flex", gap: 12 }}>
+                        <button
+                          onClick={() => handleAdminEditSubmit(selectedRequest.id)}
                           className="btn-primary"
-                          disabled
-                          style={{ opacity: 0.5, cursor: "not-allowed", fontSize: 14 }}
+                          style={{ width: "auto", paddingInline: 20 }}
                         >
-                          Tugaskan (Issue 4)
+                          Simpan
+                        </button>
+                        <button
+                          onClick={() => setIsAdminEditing(false)}
+                          className="btn-logout"
+                          style={{ width: "auto", paddingInline: 20 }}
+                        >
+                          Batal
                         </button>
                       </div>
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
-                        <button
-                          onClick={() => handleAdminClose(selectedRequest.id)}
-                          className="btn-logout"
-                          style={{ fontWeight: 600 }}
+                    </div>
+                  ) : showMergeModal ? (
+                    // ADMIN MERGE MODE
+                    <div style={{ marginBottom: 20 }}>
+                      <h3 style={{ margin: "0 0 16px", color: "var(--text-h)", fontSize: 18 }}>Gabungkan Laporan Duplikat</h3>
+                      <p style={{ fontSize: 13, color: "var(--text)", marginBottom: 12 }}>
+                        Laporan ini akan ditandai sebagai duplikat dan digabungkan ke laporan utama yang Anda pilih di bawah.
+                      </p>
+                      <div className="form-group">
+                        <label>Pilih Laporan Utama</label>
+                        <select
+                          value={mergeTargetRequestId}
+                          onChange={(e) => setMergeTargetRequestId(e.target.value)}
+                          className="form-select"
                         >
-                          Tutup Laporan
+                          <option value="">-- Pilih Laporan Utama --</option>
+                          {requests
+                            .filter(r => r.id !== selectedRequest.id && !['CLOSED_AUTO', 'CLOSED_ADMIN', 'CLOSED_REPORTER_CONFIRMED', 'CANCELLED', 'MERGED'].includes(r.status))
+                            .map(r => (
+                              <option key={r.id} value={r.id}>{r.request_number} - {r.title}</option>
+                            ))
+                          }
+                        </select>
+                      </div>
+                      <div style={{ display: "flex", gap: 12 }}>
+                        <button
+                          onClick={() => handleAdminMergeSubmit(selectedRequest.id)}
+                          className="btn-primary"
+                          style={{ width: "auto", paddingInline: 20 }}
+                        >
+                          Gabungkan
                         </button>
-                        {selectedRequest.status === "REOPEN_REQUESTED" && (
-                          <button
-                            onClick={() => handleAdminReopen(selectedRequest.id)}
-                            className="btn-primary"
-                            style={{ width: "auto", paddingInline: 20 }}
-                          >
-                            Buka Ulang Laporan
-                          </button>
-                        )}
+                        <button
+                          onClick={() => setShowMergeModal(false)}
+                          className="btn-logout"
+                          style={{ width: "auto", paddingInline: 20 }}
+                        >
+                          Batal
+                        </button>
+                      </div>
+                    </div>
+                  ) : showReassignModal ? (
+                    // ADMIN REASSIGN MODE
+                    <div style={{ marginBottom: 20 }}>
+                      <h3 style={{ margin: "0 0 16px", color: "var(--text-h)", fontSize: 18 }}>Ganti Teknisi Utama</h3>
+                      <div className="form-group">
+                        <label>Pilih Teknisi Baru</label>
+                        <select
+                          value={reassignTechnicianId}
+                          onChange={(e) => setReassignTechnicianId(e.target.value)}
+                          className="form-select"
+                        >
+                          <option value="">-- Pilih Teknisi --</option>
+                          {techniciansList.map(t => (
+                            <option key={t.id} value={t.id}>{t.name} ({t.campus_email})</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="form-group">
+                        <label>Alasan Penggantian (wajib, min 5 karakter)</label>
+                        <textarea
+                          value={reassignReason}
+                          onChange={(e) => setReassignReason(e.target.value)}
+                          placeholder="Masukkan alasan penggantian..."
+                          rows={3}
+                          className="form-textarea"
+                        />
+                      </div>
+                      <div style={{ display: "flex", gap: 12 }}>
+                        <button
+                          onClick={() => handleAdminReassignSubmit(selectedRequest.id)}
+                          className="btn-primary"
+                          style={{ width: "auto", paddingInline: 20 }}
+                        >
+                          Kirim Pengajuan
+                        </button>
+                        <button
+                          onClick={() => setShowReassignModal(false)}
+                          className="btn-logout"
+                          style={{ width: "auto", paddingInline: 20 }}
+                        >
+                          Batal
+                        </button>
                       </div>
                     </div>
                   ) : (
-                    <button 
-                      onClick={() => setSelectedRequest(null)}
-                      className="btn-logout"
-                      style={{ width: "100%" }}
-                    >
-                      Tutup Peninjauan
-                    </button>
+                    // NORMAL DETAIL VIEW
+                    <div>
+                      <h3 style={{ margin: "0 0 16px", color: "var(--text-h)", fontSize: 20 }}>{selectedRequest.title}</h3>
+
+                      <div style={{ marginBottom: 16 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", textTransform: "uppercase", letterSpacing: 0.5 }}>Lokasi</div>
+                        <div style={{ color: "var(--text-h)", fontSize: 15 }}>{selectedRequest.location}</div>
+                      </div>
+
+                      <div style={{ marginBottom: 16 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", textTransform: "uppercase", letterSpacing: 0.5 }}>Kategori</div>
+                        <div style={{ color: "var(--text-h)", fontSize: 15 }}>{selectedRequest.category}</div>
+                      </div>
+
+                      <div style={{ marginBottom: 16 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", textTransform: "uppercase", letterSpacing: 0.5 }}>Teknisi Aktif</div>
+                        <div style={{ color: "var(--text-h)", fontSize: 15, fontWeight: 600 }}>
+                          {selectedRequest.technician_name || "Belum Ditugaskan"}
+                        </div>
+                      </div>
+
+                      <div style={{ marginBottom: 20 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", textTransform: "uppercase", letterSpacing: 0.5 }}>Deskripsi</div>
+                        <div style={{ color: "var(--text-h)", fontSize: 14, background: "var(--bg)", padding: 12, borderRadius: 6, border: "1px solid var(--border)", whiteSpace: "pre-line" }}>
+                          {selectedRequest.description}
+                        </div>
+                      </div>
+
+                      {selectedRequest.status === "REJECTED" && (
+                        <div style={{ marginBottom: 20, padding: 12, background: "rgba(239, 68, 68, 0.05)", border: "1px solid rgba(239, 68, 68, 0.2)", borderRadius: 6 }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: "#ef4444" }}>ALASAN PENOLAKAN</div>
+                          <div style={{ color: "var(--text-h)", fontSize: 14, marginTop: 4 }}>{selectedRequest.rejection_reason}</div>
+                        </div>
+                      )}
+
+                      {/* ACTIONS BASED ON STATUS */}
+                      {["SUBMITTED", "UNDER_REVIEW"].includes(selectedRequest.status) && (
+                        <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
+                          <button
+                            onClick={() => setIsAdminEditing(true)}
+                            className="btn-primary"
+                            style={{ background: "#3b82f6", width: "auto", paddingInline: 16 }}
+                          >
+                            ✎ Edit Detail
+                          </button>
+                          <button
+                            onClick={() => setShowMergeModal(true)}
+                            className="btn-primary"
+                            style={{ background: "#8b5cf6", width: "auto", paddingInline: 16 }}
+                          >
+                            ⎘ Merge Duplikat
+                          </button>
+                        </div>
+                      )}
+
+                      {["ASSIGNED", "IN_PROGRESS", "NEED_HELP", "WAITING_PARTS", "PAUSED"].includes(selectedRequest.status) && (
+                        <div style={{ marginBottom: 20 }}>
+                          <button
+                            onClick={() => setShowReassignModal(true)}
+                            className="btn-primary"
+                            style={{ background: "#f59e0b", width: "auto", paddingInline: 16 }}
+                          >
+                            ⇄ Ganti Teknisi
+                          </button>
+                        </div>
+                      )}
+
+                      {/* REJECT AND PRIMARY ASSIGN SECTION */}
+                      {["SUBMITTED", "UNDER_REVIEW", "REOPEN_REQUESTED", "REJECTED"].includes(selectedRequest.status) ? (
+                        <div>
+                          <div className="form-group">
+                            <label style={{ fontSize: 12 }}>Alasan Penolakan (Wajib jika menolak)</label>
+                            <textarea
+                              placeholder="Tulis alasan mengapa laporan ini tidak valid..."
+                              value={rejectionReasonInput}
+                              onChange={(e) => setRejectionReasonInput(e.target.value)}
+                              rows={3}
+                              className="form-textarea"
+                              style={{ fontSize: 14 }}
+                            />
+                          </div>
+
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 12, marginBottom: 16 }}>
+                            <button 
+                              onClick={() => handleReject(selectedRequest.id)}
+                              className="btn-logout"
+                              style={{ borderColor: "#ef4444", color: "#ef4444", fontWeight: 600 }}
+                            >
+                              Tolak Laporan
+                            </button>
+                          </div>
+
+                          <div className="form-group" style={{ borderTop: "1px solid var(--border)", paddingTop: 16 }}>
+                            <label style={{ fontSize: 12, fontWeight: 600 }}>Tugaskan Teknisi Utama</label>
+                            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                              <select
+                                value={selectedTechId}
+                                onChange={(e) => setSelectedTechId(e.target.value)}
+                                className="form-select"
+                                style={{ flex: 1 }}
+                              >
+                                <option value="">-- Pilih Teknisi --</option>
+                                {techniciansList.map(t => (
+                                  <option key={t.id} value={t.id}>{t.name} ({t.campus_email})</option>
+                                ))}
+                              </select>
+                              <button
+                                onClick={() => handleAdminAssignSubmit(selectedRequest.id, selectedTechId)}
+                                className="btn-primary"
+                                style={{ width: "auto", paddingInline: 16 }}
+                              >
+                                Tugaskan
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        // OTHER STATUSES
+                        <div style={{ display: "flex", gap: 8, flexDirection: "column" }}>
+                          <button
+                            onClick={() => handleAdminClose(selectedRequest.id)}
+                            className="btn-logout"
+                            style={{ fontWeight: 600, width: "100%" }}
+                          >
+                            Tutup Laporan (Selesai/Admin)
+                          </button>
+                          {selectedRequest.status === "REOPEN_REQUESTED" && (
+                            <button
+                              onClick={() => handleAdminReopen(selectedRequest.id)}
+                              className="btn-primary"
+                              style={{ width: "100%" }}
+                            >
+                              Buka Ulang Laporan
+                            </button>
+                          )}
+                        </div>
+                      )}
+
+                      <button 
+                        onClick={() => setSelectedRequest(null)}
+                        className="btn-logout"
+                        style={{ width: "100%", marginTop: 16 }}
+                      >
+                        Tutup Peninjauan
+                      </button>
+                    </div>
                   )}
                 </div>
               ) : (
@@ -1596,24 +2272,524 @@ export default function App() {
       {user.role === "TECHNICIAN" && (
         <main className="workspace-container">
           <h1>Layar Kerja Teknisi</h1>
-          <p>Pantau tugas perbaikan Anda, update progress, dan ubah status.</p>
+          <p style={{ marginBottom: 28 }}>Pantau tugas perbaikan Anda, update progress, dan ubah status.</p>
 
-          <div className="placeholder-view">
-            <h3 style={{ margin: "0 0 8px", color: "var(--text-h)" }}>Daftar Tugas Saya (Assigned Tasks)</h3>
-            <p>Fitur tugas teknisi dan pembaruan progress akan diimplementasikan pada tahap issue berikutnya.</p>
+          <div className="flex-container">
+            <div className="flex-main">
+              <h2>Daftar Tugas Saya</h2>
+              {requests.length === 0 ? (
+                <div className="placeholder-view">
+                  <p>Tidak ada tugas aktif atau pengajuan tugas yang diarahkan kepada Anda saat ini.</p>
+                </div>
+              ) : (
+                <table className="premium-table">
+                  <thead>
+                    <tr>
+                      <th>Nomor</th>
+                      <th>Judul</th>
+                      <th>Lokasi</th>
+                      <th>Kategori</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {requests.map((item) => (
+                      <tr key={item.id} style={{ cursor: "pointer" }} onClick={() => handleSelectRequest(item)}>
+                        <td><code>{item.request_number}</code></td>
+                        <td style={{ fontWeight: 600 }}>{item.title}</td>
+                        <td style={{ fontSize: 13 }}>{item.location}</td>
+                        <td>{item.category}</td>
+                        <td>
+                          <span className={`status-indicator ${item.status.toLowerCase() === 'in_progress' ? 'progress' : 'submitted'}`}>
+                            {item.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            <div className="flex-side">
+              <h2>Detail Pekerjaan</h2>
+              {selectedRequestDetail ? (
+                <div className="premium-card" style={{ maxWidth: "100%", padding: 24, background: "var(--social-bg)" }}>
+                  <code style={{ fontSize: 14 }}>{selectedRequestDetail.request_number}</code>
+                  <h3 style={{ margin: "8px 0 16px", color: "var(--text-h)", fontSize: 20 }}>{selectedRequestDetail.title}</h3>
+
+                  {/* REASSIGNMENT APPROVAL WORKFLOW FOR TECHNICIAN */}
+                  {selectedRequestDetail.pending_reassignment && (
+                    (() => {
+                      const [asgnId, newTechId, newTechName, reassignReason, oldApprovedAt, newApprovedAt] = selectedRequestDetail.pending_reassignment.split(":");
+                      const isOldTech = user.id !== newTechId;
+                      const isNewTech = user.id === newTechId;
+
+                      return (
+                        <div style={{ marginBottom: 20, padding: 16, background: "rgba(245, 158, 11, 0.08)", border: "1px solid rgba(245, 158, 11, 0.3)", borderRadius: 8 }}>
+                          <h4 style={{ margin: "0 0 8px", color: "#d97706" }}>Persetujuan Reassign Teknisi</h4>
+                          <p style={{ fontSize: 13, marginBottom: 12 }}>
+                            {isNewTech 
+                              ? `Anda ditawarkan tugas ini menggantikan teknisi lama. Alasan: "${reassignReason}"`
+                              : `Administrator mengajukan penggantian Anda dengan ${newTechName}. Alasan: "${reassignReason}"`
+                            }
+                          </p>
+                          <div style={{ display: "flex", gap: 12 }}>
+                            {((isOldTech && !oldApprovedAt) || (isNewTech && !newApprovedAt)) ? (
+                              <>
+                                <button
+                                  onClick={() => handleTechReassignDecision(selectedRequestDetail.id, true)}
+                                  className="btn-primary"
+                                  style={{ background: "#10b981", width: "auto", paddingInline: 16 }}
+                                >
+                                  Setujui
+                                </button>
+                                <button
+                                  onClick={() => handleTechReassignDecision(selectedRequestDetail.id, false)}
+                                  className="btn-logout"
+                                  style={{ borderColor: "#ef4444", color: "#ef4444", width: "auto", paddingInline: 16 }}
+                                >
+                                  Tolak
+                                </button>
+                              </>
+                            ) : (
+                              <span style={{ fontSize: 13, color: "var(--text)", fontStyle: "italic" }}>
+                                Anda telah menyetujui. Menunggu persetujuan dari teknisi lainnya.
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })()
+                  )}
+
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", textTransform: "uppercase" }}>Lokasi</div>
+                    <div style={{ color: "var(--text-h)", fontSize: 15 }}>{selectedRequestDetail.location}</div>
+                  </div>
+
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", textTransform: "uppercase" }}>Kategori</div>
+                    <div style={{ color: "var(--text-h)", fontSize: 15 }}>{selectedRequestDetail.category}</div>
+                  </div>
+
+                  <div style={{ marginBottom: 20 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", textTransform: "uppercase" }}>Deskripsi</div>
+                    <div style={{ color: "var(--text-h)", fontSize: 14, background: "var(--bg)", padding: 12, borderRadius: 6, border: "1px solid var(--border)", whiteSpace: "pre-line" }}>
+                      {selectedRequestDetail.description}
+                    </div>
+                  </div>
+
+                  {/* COMMENTS IN TECHNICIAN DASHBOARD */}
+                  <div style={{ borderTop: "1px solid var(--border)", paddingTop: 16, marginTop: 16 }}>
+                    <h4 style={{ margin: "0 0 12px", color: "var(--text-h)" }}>Diskusi & Komentar</h4>
+                    <div style={{ maxHeight: 200, overflowY: "auto", marginBottom: 16, background: "var(--bg)", padding: 10, borderRadius: 6 }}>
+                      {comments.length === 0 ? (
+                        <p style={{ fontSize: 12, color: "var(--text)", fontStyle: "italic" }}>Belum ada komentar.</p>
+                      ) : (
+                        comments.map(c => (
+                          <div key={c.id} style={{ borderBottom: "1px solid var(--border)", paddingBottom: 8, marginBottom: 8 }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--text)", marginBottom: 4 }}>
+                              <strong>{c.author_name} ({c.author_role})</strong>
+                              <span>{c.created_at}</span>
+                            </div>
+                            <div style={{ fontSize: 13, color: "var(--text-h)" }}>{c.content}</div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                    {detailMessage && <div style={{ fontSize: 12, color: "#3b82f6", marginBottom: 8 }}>{detailMessage}</div>}
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <input
+                        type="text"
+                        value={newComment}
+                        onChange={(e) => setNewComment(e.target.value)}
+                        placeholder="Tulis komentar..."
+                        className="form-input"
+                        style={{ flex: 1, fontSize: 13 }}
+                      />
+                      <button
+                        onClick={() => handleAddComment(selectedRequestDetail.id)}
+                        className="btn-primary"
+                        style={{ width: "auto", paddingInline: 12, fontSize: 13 }}
+                      >
+                        Kirim
+                      </button>
+                    </div>
+                  </div>
+
+                  <button 
+                    onClick={() => setSelectedRequestDetail(null)}
+                    className="btn-logout"
+                    style={{ width: "100%", marginTop: 20 }}
+                  >
+                    Tutup Detail
+                  </button>
+                </div>
+              ) : (
+                <p style={{ color: "var(--text)", marginTop: 16 }}>Pilih tugas untuk melihat detail perbaikan.</p>
+              )}
+            </div>
           </div>
         </main>
       )}
 
       {user.role === "FACILITY_MANAGER" && (
         <main className="workspace-container">
-          <h1>Dashboard Manajer Fasilitas</h1>
-          <p>Lihat ringkasan statistik fasilitas kampus, unduh laporan, dan berikan catatan.</p>
-
-          <div className="placeholder-view">
-            <h3 style={{ margin: "0 0 8px", color: "var(--text-h)" }}>Analitik & Ringkasan Laporan</h3>
-            <p>Fitur dashboard manajer dan ekspor CSV akan diimplementasikan pada tahap issue berikutnya.</p>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+            <h1>Dashboard Manajer Fasilitas</h1>
+            <div style={{ display: "flex", gap: 12 }}>
+              <button
+                onClick={() => setActiveTab("DASHBOARD")}
+                className={`btn-primary`}
+                style={{ width: "auto", paddingInline: 16, background: activeTab === "DASHBOARD" ? "var(--text-h)" : "var(--social-bg)", color: activeTab === "DASHBOARD" ? "#fff" : "var(--text)" }}
+              >
+                Statistik & Laporan
+              </button>
+              <button
+                onClick={() => setActiveTab("ROOMS")}
+                className={`btn-primary`}
+                style={{ width: "auto", paddingInline: 16, background: activeTab === "ROOMS" ? "var(--text-h)" : "var(--social-bg)", color: activeTab === "ROOMS" ? "#fff" : "var(--text)" }}
+              >
+                Kelola Ruangan
+              </button>
+            </div>
           </div>
+
+          {activeTab === "ROOMS" ? (
+            // Tab 1: ROOMS MANAGEMENT
+            <div>
+              <div className="flex-container">
+                <div className="flex-main" style={{ flex: 1.5 }}>
+                  <h2>Daftar Ruangan Kampus</h2>
+                  {roomSuccess && <div className="alert-success">{roomSuccess}</div>}
+                  {roomError && <div className="alert-error">{roomError}</div>}
+
+                  {Object.keys(groupedRooms).length === 0 ? (
+                    <div className="placeholder-view">
+                      <p>Belum ada data ruangan.</p>
+                    </div>
+                  ) : (
+                    Object.keys(groupedRooms).map(building => (
+                      <div key={building} style={{ marginBottom: 24 }}>
+                        <h3 style={{ borderBottom: "2px solid var(--border)", paddingBottom: 6, color: "var(--text-h)" }}>{building}</h3>
+                        {Object.keys(groupedRooms[building]).map(floor => (
+                          <div key={floor} style={{ marginLeft: 16, marginBottom: 12 }}>
+                            <h4 style={{ color: "var(--text)", margin: "8px 0" }}>{floor}</h4>
+                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                              {groupedRooms[building][floor].map(r => (
+                                <div
+                                  key={r.id}
+                                  style={{
+                                    background: "var(--social-bg)",
+                                    padding: "8px 12px",
+                                    borderRadius: 6,
+                                    border: "1px solid var(--border)",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 12
+                                  }}
+                                >
+                                  <span style={{ fontWeight: 600, color: "var(--text-h)" }}>{r.room_name}</span>
+                                  <button
+                                    onClick={() => handleDeactivateRoom(r.id)}
+                                    className="btn-logout"
+                                    style={{
+                                      padding: "2px 6px",
+                                      fontSize: 10,
+                                      borderColor: "#ef4444",
+                                      color: "#ef4444",
+                                      width: "auto"
+                                    }}
+                                  >
+                                    Nonaktifkan
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                <div className="flex-side" style={{ flex: 1 }}>
+                  <h2>Tambah Ruangan Baru</h2>
+                  <div className="premium-card" style={{ padding: 20 }}>
+                    <form onSubmit={handleAddRoom}>
+                      <div className="form-group">
+                        <label>Nama Gedung</label>
+                        <input
+                          type="text"
+                          value={roomBuildingInput}
+                          onChange={(e) => setRoomBuildingInput(e.target.value)}
+                          placeholder="misal: Gedung A"
+                          className="form-input"
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label>Lantai</label>
+                        <input
+                          type="text"
+                          value={roomFloorInput}
+                          onChange={(e) => setRoomFloorInput(e.target.value)}
+                          placeholder="misal: Lantai 2"
+                          className="form-input"
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label>Nama / Nomor Ruangan</label>
+                        <input
+                          type="text"
+                          value={roomNameInput}
+                          onChange={(e) => setRoomNameInput(e.target.value)}
+                          placeholder="misal: Ruang Rapat Utama"
+                          className="form-input"
+                        />
+                      </div>
+                      <button type="submit" className="btn-primary">Tambah</button>
+                    </form>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            // Tab 2: ANALYTICS & REPORTS
+            <div>
+              {fmSuccess && <div className="alert-success">{fmSuccess}</div>}
+              {fmError && <div className="alert-error">{fmError}</div>}
+
+              {/* Stats Widgets */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 20, marginBottom: 28 }}>
+                <div className="premium-card" style={{ padding: 24, textAlign: "center", display: "flex", flexDirection: "column", justifyContent: "center" }}>
+                  <h3 style={{ margin: 0, fontSize: 16, color: "var(--text)" }}>Total Masalah Selesai</h3>
+                  <div style={{ fontSize: 64, fontWeight: 800, color: "#10b981", margin: "12px 0" }}>
+                    {fmStats?.total_solved ?? 0}
+                  </div>
+                  <span style={{ fontSize: 13, color: "var(--text)" }}>laporan diselesaikan</span>
+                </div>
+
+                <div className="premium-card" style={{ padding: 24 }}>
+                  <h3 style={{ margin: "0 0 16px" }}>Distribusi Kategori Masalah</h3>
+                  {(!fmStats || fmStats.category_chart.length === 0) ? (
+                    <p style={{ fontStyle: "italic", color: "var(--text)" }}>Tidak ada data laporan.</p>
+                  ) : (
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                      {fmStats.category_chart.map(item => {
+                        const total = fmStats.category_chart.reduce((acc, c) => acc + c.count, 0);
+                        const pct = total > 0 ? (item.count / total) * 100 : 0;
+                        return (
+                          <div key={item.category_name}>
+                            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
+                              <span style={{ fontWeight: 600 }}>{item.category_name}</span>
+                              <span>{item.count} ({pct.toFixed(0)}%)</span>
+                            </div>
+                            <div style={{ background: "var(--border)", height: 6, borderRadius: 3 }}>
+                              <div style={{ background: "#3b82f6", height: "100%", borderRadius: 3, width: `${pct}%` }} />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Filters Row */}
+              <div className="premium-card" style={{ padding: 16, marginBottom: 20 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr", gap: 12, alignItems: "end" }}>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 600 }}>Kategori</label>
+                    <select
+                      value={fmFilterCategory}
+                      onChange={(e) => setFmFilterCategory(e.target.value)}
+                      className="form-select"
+                      style={{ height: 38, fontSize: 13 }}
+                    >
+                      <option value="">Semua Kategori</option>
+                      {categoriesList.map(c => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 600 }}>Ruangan</label>
+                    <select
+                      value={fmFilterRoom}
+                      onChange={(e) => setFmFilterRoom(e.target.value)}
+                      className="form-select"
+                      style={{ height: 38, fontSize: 13 }}
+                    >
+                      <option value="">Semua Ruangan</option>
+                      {roomsList.map(r => (
+                        <option key={r.id} value={r.id}>{r.building} - {r.room_name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 600 }}>Tanggal Mulai</label>
+                    <input
+                      type="date"
+                      value={fmFilterStartDate}
+                      onChange={(e) => setFmFilterStartDate(e.target.value)}
+                      className="form-input"
+                      style={{ height: 38, fontSize: 13 }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 600 }}>Tanggal Akhir</label>
+                    <input
+                      type="date"
+                      value={fmFilterEndDate}
+                      onChange={(e) => setFmFilterEndDate(e.target.value)}
+                      className="form-input"
+                      style={{ height: 38, fontSize: 13 }}
+                    />
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <div style={{ flex: 1 }}>
+                      <label style={{ fontSize: 11, fontWeight: 600 }}>Urutan</label>
+                      <select
+                        value={fmSort}
+                        onChange={(e) => setFmSort(e.target.value)}
+                        className="form-select"
+                        style={{ height: 38, fontSize: 13 }}
+                      >
+                        <option value="newest">Terbaru</option>
+                        <option value="oldest">Terlama</option>
+                      </select>
+                    </div>
+                    <button
+                      onClick={() => {
+                        let query = "?";
+                        if (fmFilterCategory) query += `category_id=${fmFilterCategory}&`;
+                        if (fmFilterRoom) query += `room_id=${fmFilterRoom}&`;
+                        if (fmFilterStartDate) query += `start_date=${fmFilterStartDate}&`;
+                        if (fmFilterEndDate) query += `end_date=${fmFilterEndDate}&`;
+                        query += `sort=${fmSort}`;
+                        window.open(`/api/reports/summary.csv${query}`);
+                      }}
+                      className="btn-primary"
+                      style={{ height: 38, fontSize: 13, background: "#10b981", width: "auto", paddingInline: 12 }}
+                    >
+                      CSV
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Summary Table */}
+              <div className="flex-container">
+                <div className="flex-main">
+                  <h2>Laporan Ringkas</h2>
+                  {fmSummary.length === 0 ? (
+                    <div className="placeholder-view">
+                      <p>Tidak ada laporan yang sesuai dengan filter.</p>
+                    </div>
+                  ) : (
+                    <table className="premium-table">
+                      <thead>
+                        <tr>
+                          <th>Nomor</th>
+                          <th>Judul</th>
+                          <th>Kategori</th>
+                          <th>Lokasi</th>
+                          <th>Status</th>
+                          <th>Catatan</th>
+                          <th>Aksi</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {fmSummary.map(row => (
+                          <tr key={row.id}>
+                            <td><code>{row.request_number}</code></td>
+                            <td style={{ fontWeight: 600 }}>{row.title}</td>
+                            <td>{row.category}</td>
+                            <td style={{ fontSize: 13 }}>{row.location}</td>
+                            <td>
+                              <span className={`status-indicator ${row.status.toLowerCase() === 'closed_reporter_confirmed' || row.status.toLowerCase() === 'closed_admin' || row.status.toLowerCase() === 'closed_auto' ? 'submitted' : 'progress'}`}
+                                    style={['closed_reporter_confirmed', 'closed_admin', 'closed_auto'].includes(row.status.toLowerCase()) ? { background: "rgba(16, 185, 129, 0.1)", color: "#10b981" } : {}}>
+                                {row.status}
+                              </span>
+                            </td>
+                            <td style={{ fontSize: 12, maxWidth: 150, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {row.follow_up_note || <span style={{ color: "var(--text)", fontStyle: "italic" }}>Belum ada</span>}
+                            </td>
+                            <td>
+                              <button
+                                onClick={() => {
+                                  setSelectedFmReport(row);
+                                  setFmNoteInput(row.follow_up_note || "");
+                                  setFmNoteReasonInput("");
+                                  setFmError("");
+                                  setFmSuccess("");
+                                }}
+                                className="btn-primary"
+                                style={{ padding: "4px 8px", fontSize: 12, width: "auto" }}
+                              >
+                                Catatan
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+
+                {/* Follow-up Note Dialog */}
+                {selectedFmReport && (
+                  <div className="flex-side">
+                    <h2>Catatan Tindak Lanjut</h2>
+                    <div className="premium-card" style={{ padding: 20, background: "var(--social-bg)" }}>
+                      <h4 style={{ margin: "0 0 8px", color: "var(--text-h)" }}>
+                        Laporan {selectedFmReport.request_number}
+                      </h4>
+                      <p style={{ fontSize: 13, color: "var(--text)", marginBottom: 16 }}>
+                        Masukkan catatan tindak lanjut hasil evaluasi Anda.
+                      </p>
+                      <form onSubmit={handleAddFmFollowUp}>
+                        <div className="form-group">
+                          <label>Isi Catatan</label>
+                          <textarea
+                            value={fmNoteInput}
+                            onChange={(e) => setFmNoteInput(e.target.value)}
+                            placeholder="Catatan penanganan, kesimpulan atau instruksi lanjutan..."
+                            rows={3}
+                            className="form-textarea"
+                          />
+                        </div>
+                        <div className="form-group">
+                          <label>Alasan (wajib, min 5 karakter)</label>
+                          <input
+                            type="text"
+                            value={fmNoteReasonInput}
+                            onChange={(e) => setFmNoteReasonInput(e.target.value)}
+                            placeholder="Alasan perubahan catatan..."
+                            className="form-input"
+                          />
+                        </div>
+                        <div style={{ display: "flex", gap: 12 }}>
+                          <button type="submit" className="btn-primary" style={{ width: "auto", paddingInline: 20 }}>
+                            Simpan
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedFmReport(null)}
+                            className="btn-logout"
+                            style={{ width: "auto", paddingInline: 20 }}
+                          >
+                            Batal
+                          </button>
+                        </div>
+                      </form>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </main>
       )}
     </div>

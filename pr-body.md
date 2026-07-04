@@ -1,25 +1,24 @@
 ## Issue
-Closes #10
+Closes #12
 
 ## Requirement
-FR-022: Sistem harus mengirim notifikasi melalui aplikasi saat status laporan berubah pada kondisi yang ditentukan.
-FR-023: Sistem harus mengirim notifikasi aplikasi saat masalah sudah ditangani, membutuhkan suku cadang baru, teknisi butuh bantuan, dan pekerjaan terjeda.
-FR-037: Sistem harus menyediakan riwayat notifikasi dan status notifikasi sudah dibaca.
+- FR-038: Sistem harus mengizinkan administrator mengedit kategori, lokasi, atau deskripsi laporan sebelum menugaskan teknisi dengan menyertakan alasan.
+- FR-039: Sistem harus mengizinkan administrator menggabungkan laporan duplikat.
+- FR-040: Sistem harus mengizinkan administrator mengganti teknisi setelah laporan berjalan dengan persetujuan teknisi lama dan teknisi baru.
 
 ## Acceptance Criteria
-- AC-020: Setiap perubahan status yang memicu notifikasi akan dicatat ke dalam database notifikasi penerima.
-- AC-021: Pengguna memiliki panel notifikasi untuk melihat daftar notifikasi dan menandai notifikasi sebagai sudah dibaca (read_at terisi).
+- AC-024: Admin dapat menggabungkan laporan duplikat ke laporan utama (menghubungkan id laporan duplikat ke laporan utama).
+- AC-025: Penggantian teknisi di tengah jalan memerlukan konfirmasi persetujuan (approved) dari teknisi lama dan teknisi baru sebelum assignment baru aktif.
 
 ## Perubahan
-- Migration 0009: tabel notifications
-- Worker: GET /api/notifications, POST /api/notifications/:id/read, helper createNotification, trigger pada setiap perubahan status
-- Frontend: icon bell dengan badge di header, dropdown notifikasi, tombol mark-as-read
-- Tests: 12 test baru (notification creation, read flow, recipient determination)
+- Migration 0012: menambahkan kolom `duplicate_of_id` di tabel `service_requests`.
+- Worker: endpoint `/api/admin/requests/:id/edit` (edit admin), `/api/admin/requests/:id/merge` (merge laporan), `/api/admin/requests/:id/reassign` (reassign request), dan `/api/requests/:id/reassign/approve` (persetujuan teknisi).
+- Frontend: Tab Antrean Review vs Semua Laporan untuk Admin, panel edit detail, tombol & modal merge duplikat, tombol & modal reassign teknisi, serta panel persetujuan reassign di halaman Teknisi.
+- Tests: 5 unit/integration test baru di `tests/unit/admin-advanced.test.ts`.
 
 ## Test
-- [ ] Test dijalankan
-- [ ] Build berhasil
-- [ ] Dicoba di browser
+- [x] Test dijalankan (107/107 passed)
+- [x] Build berhasil
 
 ## Penggunaan AI
 Skill yang digunakan: 10-implementation
