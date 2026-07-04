@@ -1,73 +1,46 @@
-# React + TypeScript + Vite
+# Campus Service Request and Maintenance System
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Aplikasi web berbasis Cloudflare Workers dan D1 Database yang digunakan untuk memantau, mengelola, dan menyelesaikan pelaporan masalah fasilitas di lingkungan kampus. Proyek ini dibangun sebagai bagian dari mata kuliah **Software Engineering** dengan bantuan AI (dari proses Requirements Engineering hingga Deployment).
 
-Currently, two official plugins are available:
+---
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## 1. Format Pengumpulan
 
-## React Compiler
+* **Nama**: [Isi di sini]
+* **NIM**: [Isi di sini]
+* **Kelas**: [Isi di sini]
+* **Anggota tim**: [Isi di sini]
+* **Repository URL**: [Isi di sini]
+* **Cloudflare URL**: [Isi di sini]
+* **Commit terakhir**: [Isi di sini]
+* **Jumlah test**: [Isi di sini]
+* **AI yang digunakan**: [Isi di sini]
+* **Known limitations**: [Isi di sini]
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+---
 
-## Expanding the ESLint configuration
+## 2. Pertanyaan Refleksi
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+### 1. Bagian mana yang paling membantu ketika menggunakan AI?
+> **Jawaban**: [Isi di sini]
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+### 2. Kesalahan apa yang paling sering dibuat AI?
+> **Jawaban**: [Isi di sini]
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+### 3. Fitur apa yang pernah dibuat AI tetapi tidak terdapat pada requirement?
+> **Jawaban**: [Isi di sini]
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+### 4. Test apa yang gagal dan apa penyebabnya?
+> **Jawaban**: [Isi di sini]
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+### 5. Perubahan apa yang dilakukan setelah human review?
+> **Jawaban**: [Isi di sini]
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+### 6. Mengapa output AI tidak boleh langsung dianggap benar?
+> **Jawaban**: [Isi di sini]
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+### 7. Bagaimana traceability membantu proyek?
+> **Jawaban**: [Isi di sini]
+
+### 8. Apa yang akan diperbaiki jika proyek diulang?
+> **Jawaban**: [Isi di sini]
