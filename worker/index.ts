@@ -202,6 +202,80 @@ export default {
       return json({ success: true, status: "ASSIGNED" }, 200);
     }
 
+    // Endpoint GET & POST /api/requests/:id/progress
+    const progressMatch = url.pathname.match(/^\/api\/requests\/([a-zA-Z0-9-]+)\/progress$/);
+    if (progressMatch) {
+      const requestId = progressMatch[1];
+
+      // GET /api/requests/:id/progress
+      if (request.method === "GET") {
+        // Pastikan laporan ada
+        const checkRequest = await env.DB.prepare(`
+          SELECT id FROM service_requests WHERE id = ?
+        `).bind(requestId).first();
+
+        if (!checkRequest) {
+          return json({ error: "Laporan tidak ditemukan." }, 404);
+        }
+
+        const result = await env.DB.prepare(`
+          SELECT tp.id, tp.status, tp.notes, tp.created_at, u.name AS technician_name
+          FROM technician_progress tp
+          JOIN users u ON tp.technician_id = u.id
+          WHERE tp.request_id = ?
+          ORDER BY tp.created_at DESC
+        `).bind(requestId).all();
+
+        return json({ data: result.results });
+      }
+
+      // POST /api/requests/:id/progress
+      if (request.method === "POST") {
+        if (currentUser.role !== "TECHNICIAN") {
+          return json({ error: "Hanya teknisi (TECHNICIAN) yang dapat memperbarui progress." }, 403);
+        }
+
+        const input = await request.json() as { status?: string; notes?: string };
+
+        if (!input.status || !input.notes) {
+          return json({ error: "Kolom status dan catatan progress wajib diisi." }, 422);
+        }
+
+        if (!["ASSIGNED", "IN_PROGRESS", "ON_HOLD", "RESOLVED"].includes(input.status)) {
+          return json({ error: "Status progress tidak valid." }, 422);
+        }
+
+        if (input.notes.trim().length < 5) {
+          return json({ error: "Catatan progress wajib diisi (minimal 5 karakter)." }, 422);
+        }
+
+        // Verifikasi apakah teknisi bersangkutan ditugaskan secara aktif pada laporan ini
+        const activeAssignment = await env.DB.prepare(`
+          SELECT id FROM request_assignments
+          WHERE request_id = ? AND technician_id = ? AND status = 'ACTIVE'
+        `).bind(requestId, currentUser.id).first();
+
+        if (!activeAssignment) {
+          return json({ error: "Anda tidak ditugaskan secara aktif untuk laporan ini." }, 403);
+        }
+
+        const progressId = `prg-${crypto.randomUUID()}`;
+
+        // Insert progress log
+        await env.DB.prepare(`
+          INSERT INTO technician_progress (id, request_id, technician_id, status, notes)
+          VALUES (?, ?, ?, ?, ?)
+        `).bind(progressId, requestId, currentUser.id, input.status, input.notes.trim()).run();
+
+        // Update status laporan di service_requests
+        await env.DB.prepare(`
+          UPDATE service_requests SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+        `).bind(input.status, requestId).run();
+
+        return json({ success: true, status: input.status }, 200);
+      }
+    }
+
     // Endpoint /api/requests
     if (url.pathname.startsWith("/api/requests")) {
       
