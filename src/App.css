@@ -262,6 +262,23 @@
   transform: translateY(1px);
 }
 
+.btn-secondary {
+  padding: 10px 20px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--social-bg);
+  color: var(--text-h);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.btn-secondary:hover {
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+}
+
 .alert-error {
   padding: 12px 16px;
   background: rgba(239, 68, 68, 0.1);
@@ -287,9 +304,13 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 16px 32px;
+  padding: 12px 32px;
   border-bottom: 1px solid var(--border);
   background: var(--bg);
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  backdrop-filter: blur(12px);
 }
 
 .user-profile {
@@ -327,9 +348,9 @@
 
 /* Panel Containers */
 .workspace-container {
-  padding: 40px;
+  padding: 32px 40px 48px;
   text-align: left;
-  max-width: 1000px;
+  max-width: 1200px;
   margin: 0 auto;
   width: 100%;
   box-sizing: border-box;
@@ -347,44 +368,56 @@
 
 .flex-container {
   display: flex;
+  flex-direction: column;
   gap: 40px;
-  margin-top: 32px;
-  @media (max-width: 1024px) {
-    flex-direction: column;
-  }
+  margin-top: 24px;
 }
 
 .flex-main {
-  flex: 3;
+  flex: 1;
 }
 
 .flex-side {
-  flex: 2;
+  flex: 1;
 }
 
 .premium-table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   margin-top: 16px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 12px;
   overflow: hidden;
+  font-size: 14px;
 }
 
 .premium-table th, .premium-table td {
-  padding: 14px 16px;
+  padding: 12px 16px;
   text-align: left;
   border-bottom: 1px solid var(--border);
+  white-space: nowrap;
 }
 
 .premium-table th {
   background: var(--social-bg);
   color: var(--text-h);
   font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .premium-table tr:last-child td {
   border-bottom: none;
+}
+
+.premium-table tbody tr {
+  transition: background 0.15s;
+}
+
+.premium-table tbody tr:hover {
+  background: var(--accent-bg);
 }
 
 .status-indicator {
