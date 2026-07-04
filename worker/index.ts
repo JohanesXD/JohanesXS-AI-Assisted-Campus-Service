@@ -864,7 +864,8 @@ export default {
       }
 
       const requestId = closeMatch[1];
-      const input = await request.json() as { reason?: string };
+      let input: { reason?: string } = {};
+      try { input = await request.json() as { reason?: string }; } catch { /* empty body is OK */ }
       const checkRequest = await env.DB.prepare(`
         SELECT id, status FROM service_requests WHERE id = ?
       `).bind(requestId).first<{ id: string; status: string }>();
