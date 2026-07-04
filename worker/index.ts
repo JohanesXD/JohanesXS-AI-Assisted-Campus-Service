@@ -107,10 +107,14 @@ export default {
       return json({ data: result.results });
     }
 
-    // Endpoint GET /api/technicians
-    if (url.pathname === "/api/technicians" && request.method === "GET") {
+    // Endpoint GET /api/users/technicians
+    if (url.pathname === "/api/users/technicians" && request.method === "GET") {
+      if (currentUser.role !== "ADMIN") {
+        return json({ error: "Hanya administrator (ADMIN) yang dapat melihat daftar teknisi." }, 403);
+      }
+
       const result = await env.DB.prepare(`
-        SELECT id, name, campus_email FROM users WHERE role = 'TECHNICIAN' AND is_active = 1 ORDER BY name ASC
+        SELECT id, campus_email, name FROM users WHERE role = 'TECHNICIAN' AND is_active = 1 ORDER BY name ASC
       `).all();
       return json({ data: result.results });
     }
@@ -147,133 +151,76 @@ export default {
       return json({ success: true, status: "REJECTED" }, 200);
     }
 
-    // Endpoint POST /api/requests/:id/assign
-    const assignMatch = url.pathname.match(/^\/api\/requests\/([a-zA-Z0-9-]+)\/assign$/);
-    if (assignMatch && request.method === "POST") {
+    // Endpoint POST /api/requests/:id/assign-additional
+    const assignAdditionalMatch = url.pathname.match(/^\/api\/requests\/([a-zA-Z0-9-]+)\/assign-additional$/);
+    if (assignAdditionalMatch && request.method === "POST") {
       if (currentUser.role !== "ADMIN") {
-        return json({ error: "Hanya administrator (ADMIN) yang dapat menugaskan laporan." }, 403);
+        return json({ error: "Hanya administrator (ADMIN) yang dapat menambahkan teknisi tambahan." }, 403);
       }
 
-      const requestId = assignMatch[1];
-      const input = await request.json() as { technician_id?: string };
+      const requestId = assignAdditionalMatch[1];
+      const input = await request.json() as {
+        technician_id?: string;
+        reason?: string;
+      };
 
       if (!input.technician_id) {
         return json({ error: "Teknisi wajib dipilih." }, 422);
       }
 
-      // Verifikasi keberadaan teknisi aktif
-      const techExists = await env.DB.prepare(`
-        SELECT id FROM users WHERE id = ? AND role = 'TECHNICIAN' AND is_active = 1
-      `).bind(input.technician_id).first();
-
-      if (!techExists) {
-        return json({ error: "Teknisi tidak valid atau tidak aktif." }, 422);
-      }
-
-      // Verifikasi laporan
+      // Pastikan laporan ada
       const checkRequest = await env.DB.prepare(`
-        SELECT id FROM service_requests WHERE id = ?
-      `).bind(requestId).first();
+        SELECT id, status FROM service_requests WHERE id = ?
+      `).bind(requestId).first<{ id: string; status: string }>();
 
       if (!checkRequest) {
         return json({ error: "Laporan tidak ditemukan." }, 404);
       }
 
-      // Buat penugasan baru
-      const assignmentId = `asg-${crypto.randomUUID()}`;
-      
-      // Update status penugasan lama (jika ada) ke REPLACED
-      await env.DB.prepare(`
-        UPDATE request_assignments SET status = 'REPLACED', updated_at = CURRENT_TIMESTAMP
-        WHERE request_id = ? AND status = 'ACTIVE'
-      `).bind(requestId).run();
-
-      // Insert penugasan baru
-      await env.DB.prepare(`
-        INSERT INTO request_assignments (id, request_id, technician_id, assignment_type, status, assigned_by_user_id)
-        VALUES (?, ?, ?, 'PRIMARY', 'ACTIVE', ?)
-      `).bind(assignmentId, requestId, input.technician_id, currentUser.id).run();
-
-      // Update status laporan menjadi ASSIGNED
-      await env.DB.prepare(`
-        UPDATE service_requests SET status = 'ASSIGNED', updated_at = CURRENT_TIMESTAMP WHERE id = ?
-      `).bind(requestId).run();
-
-      return json({ success: true, status: "ASSIGNED" }, 200);
-    }
-
-    // Endpoint GET & POST /api/requests/:id/progress
-    const progressMatch = url.pathname.match(/^\/api\/requests\/([a-zA-Z0-9-]+)\/progress$/);
-    if (progressMatch) {
-      const requestId = progressMatch[1];
-
-      // GET /api/requests/:id/progress
-      if (request.method === "GET") {
-        // Pastikan laporan ada
-        const checkRequest = await env.DB.prepare(`
-          SELECT id FROM service_requests WHERE id = ?
-        `).bind(requestId).first();
-
-        if (!checkRequest) {
-          return json({ error: "Laporan tidak ditemukan." }, 404);
-        }
-
-        const result = await env.DB.prepare(`
-          SELECT tp.id, tp.status, tp.notes, tp.created_at, u.name AS technician_name
-          FROM technician_progress tp
-          JOIN users u ON tp.technician_id = u.id
-          WHERE tp.request_id = ?
-          ORDER BY tp.created_at DESC
-        `).bind(requestId).all();
-
-        return json({ data: result.results });
+      // Validasi: hanya boleh tambah teknisi jika status NEED_HELP
+      if (checkRequest.status !== "NEED_HELP") {
+        return json({ error: "Hanya laporan berstatus NEED_HELP yang dapat ditambahkan teknisi tambahan." }, 422);
       }
 
-      // POST /api/requests/:id/progress
-      if (request.method === "POST") {
-        if (currentUser.role !== "TECHNICIAN") {
-          return json({ error: "Hanya teknisi (TECHNICIAN) yang dapat memperbarui progress." }, 403);
-        }
+      // Pastikan teknisi ada dan role TECHNICIAN
+      const checkTechnician = await env.DB.prepare(`
+        SELECT id, role FROM users WHERE id = ? AND role = 'TECHNICIAN' AND is_active = 1
+      `).bind(input.technician_id).first<{ id: string; role: string }>();
 
-        const input = await request.json() as { status?: string; notes?: string };
-
-        if (!input.status || !input.notes) {
-          return json({ error: "Kolom status dan catatan progress wajib diisi." }, 422);
-        }
-
-        if (!["ASSIGNED", "IN_PROGRESS", "ON_HOLD", "RESOLVED"].includes(input.status)) {
-          return json({ error: "Status progress tidak valid." }, 422);
-        }
-
-        if (input.notes.trim().length < 5) {
-          return json({ error: "Catatan progress wajib diisi (minimal 5 karakter)." }, 422);
-        }
-
-        // Verifikasi apakah teknisi bersangkutan ditugaskan secara aktif pada laporan ini
-        const activeAssignment = await env.DB.prepare(`
-          SELECT id FROM request_assignments
-          WHERE request_id = ? AND technician_id = ? AND status = 'ACTIVE'
-        `).bind(requestId, currentUser.id).first();
-
-        if (!activeAssignment) {
-          return json({ error: "Anda tidak ditugaskan secara aktif untuk laporan ini." }, 403);
-        }
-
-        const progressId = `prg-${crypto.randomUUID()}`;
-
-        // Insert progress log
-        await env.DB.prepare(`
-          INSERT INTO technician_progress (id, request_id, technician_id, status, notes)
-          VALUES (?, ?, ?, ?, ?)
-        `).bind(progressId, requestId, currentUser.id, input.status, input.notes.trim()).run();
-
-        // Update status laporan di service_requests
-        await env.DB.prepare(`
-          UPDATE service_requests SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
-        `).bind(input.status, requestId).run();
-
-        return json({ success: true, status: input.status }, 200);
+      if (!checkTechnician) {
+        return json({ error: "Teknisi tidak valid atau tidak aktif." }, 422);
       }
+
+      // Cek apakah teknisi sudah ditugaskan ke laporan ini
+      const existingAssignment = await env.DB.prepare(`
+        SELECT id FROM request_assignments WHERE request_id = ? AND technician_id = ? AND status = 'ACTIVE'
+      `).bind(requestId, input.technician_id).first<{ id: string }>();
+
+      if (existingAssignment) {
+        return json({ error: "Teknisi ini sudah ditugaskan ke laporan." }, 422);
+      }
+
+      // Buat assignment tambahan
+      const assignmentId = crypto.randomUUID();
+      await env.DB.prepare(`
+        INSERT INTO request_assignments
+        (id, request_id, technician_id, assignment_type, status, assigned_by_user_id, reason, created_at, updated_at)
+        VALUES (?, ?, ?, 'ADDITIONAL', 'ACTIVE', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      `).bind(
+        assignmentId,
+        requestId,
+        input.technician_id,
+        currentUser.id,
+        input.reason?.trim() || null
+      ).run();
+
+      return json({
+        success: true,
+        assignmentId,
+        requestId,
+        technicianId: input.technician_id,
+        assignmentType: "ADDITIONAL"
+      }, 201);
     }
 
     // Endpoint /api/requests

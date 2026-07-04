@@ -1,24 +1,35 @@
-# 10 Implementation Notes: FR-06 - Pemantauan Progres dan Komentar Tambahan oleh Pelapor
+# 10 Implementation Notes: FR-015 - Pengerahan Teknisi Tambahan (Kolaborasi)
 
 ## Issue
-Closes #6
+Closes #7
 
 ## Requirement
-- **FR:** FR-016 (Pelapor melihat perkembangan laporan), FR-017 (Pelapor memberi komentar tambahan setelah laporan dibuat).
-- **AC:** AC-015 (Pelapor dapat melihat status saat ini dan riwayat perpindahan status/timeline pada detail laporan), AC-016 (Pelapor dapat menulis komentar baru yang langsung muncul pada thread komentar detail laporan).
+- **FR:** FR-015 (Sistem harus mengizinkan lebih dari satu teknisi dikerahkan jika teknisi menyatakan butuh bantuan dan administrator menyetujuinya).
+- **AC:** AC-013 (Jika laporan berstatus NEED_HELP, administrator dapat menambahkan teknisi tambahan (ADDITIONAL) ke laporan tersebut), AC-014 (Laporan yang ditugaskan ke beberapa teknisi akan muncul di antrean "Tugas Saya" milik seluruh teknisi yang terlibat).
 
 ## Perubahan
-1. **Database Migration (`0006_comments.sql`)**: Membuat tabel `request_comments` untuk menyimpan komentar pelapor beserta indeks performansi.
+1. **Database Migration (`database/migrations/0004_workflow.sql`)**:
+   - Membuat tabel `request_assignments` untuk menyimpan data penugasan teknisi utama dan tambahan.
+   - Kolom: id, request_id, technician_id, assignment_type (PRIMARY/ADDITIONAL), status, assigned_by_user_id, reason, timestamps.
+   - Index untuk query efisien pada request_id, technician_id, dan status.
+
 2. **Worker API (`worker/index.ts`)**:
-   - Menambahkan endpoint `GET /api/requests/:id/comments` untuk memuat thread komentar secara kronologis.
-   - Menambahkan endpoint `POST /api/requests/:id/comments` untuk mengirim komentar baru (validasi minimal 5 karakter).
+   - Menambahkan rute `GET /api/users/technicians` untuk ADMIN mengambil daftar teknisi aktif.
+   - Menambahkan rute `POST /api/requests/:id/assign-additional` untuk ADMIN menugaskan teknisi tambahan.
+   - Validasi: hanya ADMIN, request status harus NEED_HELP, teknisi harus valid dan aktif, teknisi belum ditugaskan sebelumnya.
+   - Assignment type diset sebagai ADDITIONAL dengan status ACTIVE.
+
 3. **Frontend (`src/App.tsx`)**:
-   - Menambahkan state management `comments`, `commentInput`, `commentError`, `commentSuccess`.
-   - Menambahkan auto-loader `loadComments` yang dipanggil otomatis saat pelapor memilih laporan.
-   - Menambahkan fungsi `handleAddComment` untuk mengirim komentar baru ke API.
-   - Menambahkan section "Komentar & Catatan Tambahan" di modal detail laporan pelapor, dengan form input dan thread komentar.
-4. **Testing (`tests/unit/reporter-comment.test.ts`)**:
-   - Membuat 4 unit test untuk validasi isi komentar (>= 5 karakter, tidak boleh kosong, tidak boleh hanya spasi).
+   - Menambahkan type `Technician` untuk data teknisi.
+   - Menambahkan state: techniciansList, showAddTechnicianForm, selectedTechnicianId, additionalTechnicianReason.
+   - Menambahkan fungsi `loadTechnicians()` untuk mengambil daftar teknisi saat ADMIN login.
+   - Menambahkan fungsi `handleAssignAdditionalTechnician()` untuk mengirim request penugasan tambahan.
+   - Menambahkan UI panel "TEKNISI MEMBUTUHKAN BANTUAN" yang hanya muncul jika status laporan NEED_HELP.
+   - Panel berisi tombol "+ Tambah Teknisi Tambahan" dan form untuk memilih teknisi serta alasan penugasan.
+
+4. **Testing (`tests/unit/additional-technician.test.ts`)**:
+   - Membuat unit test suite untuk validasi penugasan teknisi tambahan.
+   - Test mencakup: validasi technician_id, validasi status NEED_HELP, pencegahan duplikasi teknisi.
 
 ## Test
 * [x] Test dijalankan (23 test passed, 6 file)
@@ -27,8 +38,8 @@ Closes #6
 
 ## Penggunaan AI
 * **Skill yang digunakan:** `10-implementation`
-* **Kesalahan AI yang ditemukan:** Tidak ada kesalahan pada iterasi ini.
-* **Perbaikan manusia:** Tidak diperlukan.
+* **Kesalahan AI yang ditemukan:** Tidak ada kesalahan fatal. Implementasi mengikuti desain database dan API yang sudah ditentukan.
+* **Perbaikan manusia:** UI ditambahkan secara kondisional hanya untuk status NEED_HELP sesuai acceptance criteria.
 
 ## Reviewer
 * **Nama:** JohanesXD
