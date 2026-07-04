@@ -891,6 +891,177 @@ export default {
       return json({ success: true });
     }
 
+    // ========== FR-14: Room Management Endpoints ==========
+
+    // GET /api/rooms/grouped - Daftar ruangan dengan grouping gedung/lantai (FR-035)
+    if (url.pathname === "/api/rooms/grouped" && request.method === "GET") {
+      const result = await env.DB.prepare(`
+        SELECT building, floor, id, room_name
+        FROM rooms
+        WHERE is_active = 1
+        ORDER BY building ASC, floor ASC, room_name ASC
+      `).all<{ building: string; floor: string; id: string; room_name: string }>();
+
+      // Group by building -> floor -> rooms
+      const grouped: Record<string, Record<string, { id: string; room_name: string }[]>> = {};
+      for (const row of result.results) {
+        if (!grouped[row.building]) grouped[row.building] = {};
+        if (!grouped[row.building][row.floor]) grouped[row.building][row.floor] = [];
+        grouped[row.building][row.floor].push({ id: row.id, room_name: row.room_name });
+      }
+
+      return json({ data: grouped });
+    }
+
+    // POST /api/rooms - Tambah ruangan baru (FR-030, AC-028)
+    if (url.pathname === "/api/rooms" && request.method === "POST") {
+      if (currentUser.role !== "FACILITY_MANAGER") {
+        return json({ error: "Hanya Manajer Fasilitas yang dapat menambahkan ruangan." }, 403);
+      }
+
+      const input = await request.json() as {
+        building?: string;
+        floor?: string;
+        room_name?: string;
+      };
+
+      if (!input.building || input.building.trim().length < 1) {
+        return json({ error: "Nama gedung wajib diisi." }, 422);
+      }
+      if (!input.floor || input.floor.trim().length < 1) {
+        return json({ error: "Nama lantai wajib diisi." }, 422);
+      }
+      if (!input.room_name || input.room_name.trim().length < 1) {
+        return json({ error: "Nama ruangan wajib diisi." }, 422);
+      }
+
+      const building = input.building.trim();
+      const floor = input.floor.trim();
+      const roomName = input.room_name.trim();
+
+      // Cek duplikasi
+      const existing = await env.DB.prepare(`
+        SELECT id FROM rooms WHERE building = ? AND floor = ? AND room_name = ?
+      `).bind(building, floor, roomName).first();
+
+      if (existing) {
+        return json({ error: "Ruangan dengan gedung, lantai, dan nama yang sama sudah ada." }, 422);
+      }
+
+      const roomId = `rm-${crypto.randomUUID()}`;
+      await env.DB.prepare(`
+        INSERT INTO rooms (id, building, floor, room_name)
+        VALUES (?, ?, ?, ?)
+      `).bind(roomId, building, floor, roomName).run();
+
+      // Log
+      const logId = crypto.randomUUID();
+      await env.DB.prepare(`
+        INSERT INTO room_management_log (id, room_id, action, performed_by_user_id, new_building, new_floor, new_room_name)
+        VALUES (?, ?, 'CREATE', ?, ?, ?, ?)
+      `).bind(logId, roomId, currentUser.id, building, floor, roomName).run();
+
+      return json({
+        success: true,
+        room: { id: roomId, building, floor, room_name: roomName },
+      }, 201);
+    }
+
+    // PATCH /api/rooms/:id - Update ruangan
+    const roomUpdateMatch = url.pathname.match(/^\/api\/rooms\/([a-zA-Z0-9-]+)$/);
+    if (roomUpdateMatch && request.method === "PATCH") {
+      if (currentUser.role !== "FACILITY_MANAGER") {
+        return json({ error: "Hanya Manajer Fasilitas yang dapat mengupdate ruangan." }, 403);
+      }
+
+      const roomId = roomUpdateMatch[1];
+      const input = await request.json() as {
+        building?: string;
+        floor?: string;
+        room_name?: string;
+        is_active?: number;
+      };
+
+      // Ambil data lama
+      const oldRoom = await env.DB.prepare(`
+        SELECT id, building, floor, room_name, is_active FROM rooms WHERE id = ?
+      `).bind(roomId).first<{ id: string; building: string; floor: string; room_name: string; is_active: number }>();
+
+      if (!oldRoom) {
+        return json({ error: "Ruangan tidak ditemukan." }, 404);
+      }
+
+      const newBuilding = input.building?.trim() || oldRoom.building;
+      const newFloor = input.floor?.trim() || oldRoom.floor;
+      const newRoomName = input.room_name?.trim() || oldRoom.room_name;
+      const newIsActive = input.is_active !== undefined ? input.is_active : oldRoom.is_active;
+
+      // Cek duplikasi jika ada perubahan nama
+      if (newBuilding !== oldRoom.building || newFloor !== oldRoom.floor || newRoomName !== oldRoom.room_name) {
+        const duplicate = await env.DB.prepare(`
+          SELECT id FROM rooms WHERE building = ? AND floor = ? AND room_name = ? AND id != ?
+        `).bind(newBuilding, newFloor, newRoomName, roomId).first();
+
+        if (duplicate) {
+          return json({ error: "Ruangan dengan gedung, lantai, dan nama yang sama sudah ada." }, 422);
+        }
+      }
+
+      await env.DB.prepare(`
+        UPDATE rooms
+        SET building = ?, floor = ?, room_name = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).bind(newBuilding, newFloor, newRoomName, newIsActive, roomId).run();
+
+      // Log
+      const logId = crypto.randomUUID();
+      await env.DB.prepare(`
+        INSERT INTO room_management_log (id, room_id, action, performed_by_user_id, old_building, old_floor, old_room_name, new_building, new_floor, new_room_name)
+        VALUES (?, ?, 'UPDATE', ?, ?, ?, ?, ?, ?, ?)
+      `).bind(logId, roomId, currentUser.id, oldRoom.building, oldRoom.floor, oldRoom.room_name, newBuilding, newFloor, newRoomName).run();
+
+      return json({ success: true });
+    }
+
+    // DELETE /api/rooms/:id - Soft delete ruangan
+    const roomDeleteMatch = url.pathname.match(/^\/api\/rooms\/([a-zA-Z0-9-]+)$/);
+    if (roomDeleteMatch && request.method === "DELETE") {
+      if (currentUser.role !== "FACILITY_MANAGER") {
+        return json({ error: "Hanya Manajer Fasilitas yang dapat menonaktifkan ruangan." }, 403);
+      }
+
+      const roomId = roomDeleteMatch[1];
+
+      // Cek apakah ruangan sedang digunakan di laporan aktif
+      const activeRequest = await env.DB.prepare(`
+        SELECT id FROM service_requests WHERE room_id = ? AND status NOT IN ('CLOSED_AUTO', 'CLOSED_ADMIN', 'CLOSED_REPORTER_CONFIRMED', 'CANCELLED', 'MERGED')
+      `).bind(roomId).first();
+
+      if (activeRequest) {
+        return json({ error: "Ruangan sedang digunakan di laporan aktif. Tidak dapat dinonaktifkan." }, 422);
+      }
+
+      // Ambil data lama untuk log
+      const oldRoom = await env.DB.prepare(`
+        SELECT building, floor, room_name FROM rooms WHERE id = ?
+      `).bind(roomId).first<{ building: string; floor: string; room_name: string }>();
+
+      await env.DB.prepare(`
+        UPDATE rooms SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+      `).bind(roomId).run();
+
+      // Log
+      if (oldRoom) {
+        const logId = crypto.randomUUID();
+        await env.DB.prepare(`
+          INSERT INTO room_management_log (id, room_id, action, performed_by_user_id, old_building, old_floor, old_room_name)
+          VALUES (?, ?, 'DEACTIVATE', ?, ?, ?, ?)
+        `).bind(logId, roomId, currentUser.id, oldRoom.building, oldRoom.floor, oldRoom.room_name).run();
+      }
+
+      return json({ success: true, message: "Ruangan berhasil dinonaktifkan." });
+    }
+
     return json({ error: "Alamat API tidak ditemukan." }, 404);
   }
 } satisfies ExportedHandler<Env>;
