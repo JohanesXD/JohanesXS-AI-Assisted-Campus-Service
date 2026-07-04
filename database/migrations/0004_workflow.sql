@@ -2,7 +2,7 @@
 -- Create request_assignments table to support technician assignment workflow
 
 -- Request Assignments Table
-CREATE TABLE request_assignments (
+CREATE TABLE IF NOT EXISTS request_assignments (
     id TEXT PRIMARY KEY,
     request_id TEXT NOT NULL REFERENCES service_requests(id),
     technician_id TEXT NOT NULL REFERENCES users(id),
@@ -17,6 +17,6 @@ CREATE TABLE request_assignments (
 );
 
 -- Index for efficient queries
-CREATE INDEX idx_request_assignments_request_id ON request_assignments(request_id);
-CREATE INDEX idx_request_assignments_technician_id ON request_assignments(technician_id);
-CREATE INDEX idx_request_assignments_status ON request_assignments(status);
+CREATE INDEX IF NOT EXISTS idx_request_assignments_request_id ON request_assignments(request_id);
+CREATE INDEX IF NOT EXISTS idx_request_assignments_technician_id ON request_assignments(technician_id);
+CREATE INDEX IF NOT EXISTS idx_request_assignments_status ON request_assignments(status);
