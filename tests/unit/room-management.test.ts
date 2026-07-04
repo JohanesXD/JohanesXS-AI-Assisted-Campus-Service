@@ -1,7 +1,32 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const mockDb = {
-  prepare: vi.fn(),
+  prepare: vi.fn().mockImplementation((sql: string) => {
+    if (sql.includes("FROM users")) {
+      return {
+        bind: vi.fn().mockImplementation((email: string) => {
+          return {
+            first: vi.fn().mockResolvedValue({
+              id: "usr-manager",
+              campus_email: email,
+              name: "Manager Sari",
+              role: email.includes("admin") ? "ADMIN" : (email.includes("tech") ? "TECHNICIAN" : (email.includes("reporter") ? "REPORTER" : "FACILITY_MANAGER")),
+              is_active: 1
+            })
+          };
+        })
+      };
+    }
+    if (sql.includes("RESOLVED") || sql.includes("WAITING_REPORTER_CONFIRMATION")) {
+      return {
+        bind: vi.fn().mockReturnThis(),
+        all: vi.fn().mockResolvedValue({ results: [] }),
+        run: vi.fn().mockResolvedValue({}),
+        first: vi.fn().mockResolvedValue(null)
+      };
+    }
+    return mockDb;
+  }),
   bind: vi.fn().mockReturnThis(),
   first: vi.fn(),
   all: vi.fn().mockReturnValue({ results: [] }),
@@ -11,13 +36,15 @@ const mockDb = {
 const env = { DB: mockDb as any };
 
 function createRequest(method: string, pathname: string, body?: object, headers?: Record<string, string>) {
+  const role = headers?.["X-User-Role"] || "FACILITY_MANAGER";
+  const defaultEmail = role === "FACILITY_MANAGER" ? "manager@campus.ac.id" : `${role.toLowerCase()}@campus.ac.id`;
   const url = new URL(`http://localhost${pathname}`);
   return new Request(url.toString(), {
     method,
     headers: {
       "Content-Type": "application/json",
-      "X-User-Email": headers?.["X-User-Email"] || "manager@campus.ac.id",
-      "X-User-Role": headers?.["X-User-Role"] || "FACILITY_MANAGER",
+      "X-User-Email": headers?.["X-User-Email"] || defaultEmail,
+      "X-User-Role": role,
       ...headers,
     },
     body: body ? JSON.stringify(body) : undefined,
