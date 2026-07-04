@@ -1,45 +1,66 @@
-# 10 Implementation Notes: FR-09 - Konfirmasi Hasil Pekerjaan dan Penutupan Laporan
+# 11 Implementation Notes: FR-10 - Notifikasi Aplikasi dan Riwayat Baca Notifikasi
 
 ## Issue
-Closes #9
+Closes #10
 
 ## Requirement
-- **FR:** FR-018 (Pelapor konfirmasi pekerjaan selesai), FR-019 (Batas 45 menit konfirmasi), FR-020 (Penutupan otomatis 45 menit), FR-021 (Admin menutup laporan), FR-036 (Pelapor menolak hasil, admin buka ulang).
-- **AC:** AC-017 (Pelapor dapat klik Konfirmasi Selesai atau Tolak Hasil dengan alasan), AC-018 (Auto close CLOSED_AUTO setelah 45 menit), AC-019 (Admin dapat buka ulang REOPENED atau tutup paksa CLOSED_ADMIN).
+FR-022: Sistem harus mengirim notifikasi melalui aplikasi saat status laporan berubah pada kondisi yang ditentukan.
+FR-023: Sistem harus mengirim notifikasi aplikasi saat masalah sudah ditangani, membutuhkan suku cadang baru, teknisi butuh bantuan, dan pekerjaan terjeda.
+FR-037: Sistem harus menyediakan riwayat notifikasi dan status notifikasi sudah dibaca.
+
+## Acceptance Criteria
+- AC-020: Setiap perubahan status yang memicu notifikasi akan dicatat ke dalam database notifikasi penerima.
+- AC-021: Pengguna memiliki panel notifikasi untuk melihat daftar notifikasi dan menandai notifikasi sebagai sudah dibaca (read_at terisi).
 
 ## Perubahan
-1. **Database Migration (`database/migrations/0008_closure.sql`)**:
-   - Menambahkan index `idx_service_requests_confirm_due` untuk query efisien auto-close pada status `WAITING_REPORTER_CONFIRMATION`.
-   - Kolom `resolved_at`, `confirmation_due_at`, `closed_at`, `resolution_rejected_reason` sudah ada dari migration `0003_requests_expand.sql`.
+1. **Database Migration (`database/migrations/0009_notifications.sql`)**:
+   - Tabel `notifications` dengan kolom: id, user_id, type, title, message, request_id, is_read, read_at, created_at.
+   - Index untuk query unread count dan notifikasi per user.
 
 2. **Worker API (`worker/index.ts`)**:
-   - Menambahkan fungsi `runAutoClose()` untuk menutup otomatis laporan yang melebihi 45 menit tanpa konfirmasi.
-   - `runAutoClose()` dipanggil di awal setiap request handler.
-   - **POST `/api/requests/:id/resolve`** — Teknisi menyelesaikan pekerjaan (IN_PROGRESS → RESOLVED → WAITING_REPORTER_CONFIRMATION, set `resolved_at` dan `confirmation_due_at = now + 45 menit`).
-   - **POST `/api/requests/:id/confirm-resolution`** — Pelapor konfirmasi selesai (WAITING_REPORTER_CONFIRMATION → CLOSED_REPORTER_CONFIRMED, set `closed_at`).
-   - **POST `/api/requests/:id/reject-resolution`** — Pelapor tolak hasil dengan alasan (WAITING_REPORTER_CONFIRMATION → REOPEN_REQUESTED, set `resolution_rejected_reason`).
-   - **POST `/api/requests/:id/close`** — Admin tutup laporan (status aktif → CLOSED_ADMIN, set `closed_at`).
-   - **POST `/api/requests/:id/reopen`** — Admin buka ulang (REOPEN_REQUESTED → REOPENED).
-   - Menambahkan `resolved_at`, `confirmation_due_at`, `closed_at`, `resolution_rejected_reason` ke query detail laporan.
+   - **Helper `createNotification(env, userId, type, title, message, requestId)`** — insert notifikasi ke database.
+   - **Helper `notifyStatusChange(env, requestId, newStatus, changedByUserId)`** — menentukan penerima berdasarkan tipe perubahan status dan membuat notifikasi untuk setiap penerima.
+     - `SUBMITTED` → semua admin
+     - `REJECTED` → pelapor
+     - `ASSIGNED` → teknisi yang ditugaskan
+     - `IN_PROGRESS` → pelapor
+     - `NEED_HELP` → semua admin
+     - `WAITING_PARTS` → pelapor
+     - `PAUSED` → pelapor
+     - `WAITING_REPORTER_CONFIRMATION` → pelapor
+     - `CLOSED_REPORTER_CONFIRMED` → semua admin
+     - `CLOSED_AUTO` → pelapor
+     - `CLOSED_ADMIN` → pelapor
+     - `REOPEN_REQUESTED` → semua admin
+     - `REOPENED` → pelapor dan teknisi
+     - `CANCELLED` → semua admin
+   - **Trigger `notifyStatusChange`** dipanggil setelah setiap `recordStatusHistory` pada endpoint: autoClose, reject, resolve, confirm-resolution, reject-resolution, close, reopen, dan create request.
+   - **GET `/api/notifications`** — ambil 50 notifikasi terbaru milik user saat ini + `unread_count`.
+   - **POST `/api/notifications/:id/read`** — tandai satu notifikasi sebagai dibaca (validasi kepemilikan).
+   - **POST `/api/notifications/read-all`** — tandai semua notifikasi user sebagai dibaca.
 
 3. **Frontend (`src/App.tsx`)**:
-   - Menambahkan state `rejectResolutionReason`, `closureMessage`, `confirmLoading`.
-   - Menambahkan fungsi `handleConfirmResolution`, `handleRejectResolution`, `handleAdminClose`, `handleAdminReopen`.
-   - Panel detail pelapor: menampilkan panel konfirmasi dengan batas waktu dan tombol "Konfirmasi Selesai" / "Tolak Hasil" saat status `WAITING_REPORTER_CONFIRMATION`.
-   - Panel admin: menambahkan tombol "Tutup Laporan" untuk semua laporan aktif, dan "Buka Ulang Laporan" untuk status `REOPEN_REQUESTED`.
+   - Tipe `NotificationItem`.
+   - State: `notifications`, `unreadCount`, `showNotifications`.
+   - `fetchNotifications()` dipanggil saat login dan setiap 30 detik (polling).
+   - `handleMarkAsRead(notifId)` — tandai satu notifikasi.
+   - `handleMarkAllAsRead()` — tandai semua.
+   - Icon bell di header dengan badge jumlah unread.
+   - Dropdown panel notifikasi: daftar notifikasi, tombol "Tandai semua dibaca", klik notifikasi akan tandai baca + navigasi ke detail laporan.
 
-4. **Testing (`tests/unit/closure-flow.test.ts`)**:
-   - `closure-flow.test.ts` — 13 test: validasi resolve, konfirmasi, penolakan hasil, penutupan admin, pembukaan ulang.
+4. **Testing (`tests/unit/notifications.test.ts`)**:
+   - `notifications.test.ts` — 11 test: create, query by user, sorting, unread count, mark as read, mark all as read, recipient determination.
 
 ## Test
-* [x] Test dijalankan (49 test pass, 10 file)
-* [x] Build berhasil
+- [x] Test dijalankan (61 test pass, 11 file)
+- [x] Build berhasil
+- [ ] Dicoba di browser
 
 ## Penggunaan AI
-* **Skill yang digunakan:** `10-implementation`
-* **Kesalahan AI yang ditemukan:** -
-* **Perbaikan manusia:** -
+Skill yang digunakan: 10-implementation
+Kesalahan AI yang ditemukan: -
+Perbaikan manusia: -
 
 ## Reviewer
-* **Nama:** JohanesXD
-* **Keputusan:** *(Menunggu review dan merge)*
+Nama:
+Keputusan:

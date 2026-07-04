@@ -30,6 +30,178 @@ async function recordStatusHistory(
   `).bind(id, requestId, fromStatus, toStatus, changedByUserId, reason).run();
 }
 
+async function createNotification(
+  env: Env,
+  userId: string,
+  type: string,
+  title: string,
+  message: string,
+  requestId: string | null
+): Promise<void> {
+  const id = crypto.randomUUID();
+  await env.DB.prepare(`
+    INSERT INTO notifications (id, user_id, type, title, message, request_id)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).bind(id, userId, type, title, message, requestId).run();
+}
+
+// Determine who should be notified for a given status change
+async function notifyStatusChange(
+  env: Env,
+  requestId: string,
+  newStatus: string,
+  changedByUserId: string | null
+): Promise<void> {
+  // Get request info (reporter_id, assigned technicians)
+  const requestInfo = await env.DB.prepare(`
+    SELECT sr.reporter_id, sr.title,
+           u.campus_email AS reporter_email
+    FROM service_requests sr
+    JOIN users u ON sr.reporter_id = u.id
+    WHERE sr.id = ?
+  `).bind(requestId).first<{ reporter_id: string; title: string; reporter_email: string }>();
+
+  if (!requestInfo) return;
+
+  const requestTitle = requestInfo.title.length > 80
+    ? requestInfo.title.substring(0, 77) + "..."
+    : requestInfo.title;
+
+  // Get assigned admin users
+  const admins = await env.DB.prepare(`
+    SELECT id FROM users WHERE role = 'ADMIN' AND is_active = 1
+  `).all<{ id: string }>();
+
+  // Get assigned technicians
+  const technicians = await env.DB.prepare(`
+    SELECT technician_id FROM request_assignments
+    WHERE request_id = ? AND status = 'ACTIVE'
+  `).all<{ technician_id: string }>();
+
+  const reporterId = requestInfo.reporter_id;
+
+  switch (newStatus) {
+    case "SUBMITTED":
+      for (const a of admins.results) {
+        await createNotification(env, a.id, "STATUS_CHANGE",
+          "Laporan Baru Masuk",
+          `Laporan baru "${requestTitle}" menunggu pemeriksaan.`,
+          requestId);
+      }
+      break;
+
+    case "REJECTED":
+      await createNotification(env, reporterId, "STATUS_CHANGE",
+        "Laporan Ditolak",
+        `Laporan "${requestTitle}" telah ditolak oleh administrator.`,
+        requestId);
+      break;
+
+    case "ASSIGNED":
+      for (const t of technicians.results) {
+        if (t.technician_id !== changedByUserId) {
+          await createNotification(env, t.technician_id, "STATUS_CHANGE",
+            "Tugas Baru",
+            `Anda ditugaskan untuk menangani laporan "${requestTitle}".`,
+            requestId);
+        }
+      }
+      break;
+
+    case "IN_PROGRESS":
+      await createNotification(env, reporterId, "STATUS_CHANGE",
+        "Pekerjaan Dimulai",
+        `Laporan "${requestTitle}" sedang dikerjakan oleh teknisi.`,
+        requestId);
+      break;
+
+    case "NEED_HELP":
+      for (const a of admins.results) {
+        await createNotification(env, a.id, "NEED_HELP",
+          "Teknisi Butuh Bantuan",
+          `Teknisi membutuhkan bantuan untuk laporan "${requestTitle}".`,
+          requestId);
+      }
+      break;
+
+    case "WAITING_PARTS":
+      await createNotification(env, reporterId, "WAITING_PARTS",
+        "Menunggu Suku Cadang",
+        `Laporan "${requestTitle}" menunggu suku cadang baru.`,
+        requestId);
+      break;
+
+    case "PAUSED":
+      await createNotification(env, reporterId, "PAUSED",
+        "Pekerjaan Tertunda",
+        `Pekerjaan pada laporan "${requestTitle}" untuk sementara tertunda.`,
+        requestId);
+      break;
+
+    case "WAITING_REPORTER_CONFIRMATION":
+      await createNotification(env, reporterId, "RESOLVED",
+        "Pekerjaan Selesai - Konfirmasi Diperlukan",
+        `Laporan "${requestTitle}" telah selesai dikerjakan. Silakan konfirmasi dalam 45 menit.`,
+        requestId);
+      break;
+
+    case "CLOSED_REPORTER_CONFIRMED":
+      for (const a of admins.results) {
+        await createNotification(env, a.id, "STATUS_CHANGE",
+          "Laporan Ditutup (Konfirmasi Pelapor)",
+          `Laporan "${requestTitle}" telah dikonfirmasi selesai oleh pelapor.`,
+          requestId);
+      }
+      break;
+
+    case "CLOSED_AUTO":
+      await createNotification(env, reporterId, "STATUS_CHANGE",
+        "Laporan Ditutup Otomatis",
+        `Laporan "${requestTitle}" ditutup otomatis karena batas waktu konfirmasi telah habis.`,
+        requestId);
+      break;
+
+    case "CLOSED_ADMIN":
+      await createNotification(env, reporterId, "STATUS_CHANGE",
+        "Laporan Ditutup oleh Admin",
+        `Laporan "${requestTitle}" telah ditutup oleh administrator.`,
+        requestId);
+      break;
+
+    case "REOPEN_REQUESTED":
+      for (const a of admins.results) {
+        await createNotification(env, a.id, "STATUS_CHANGE",
+          "Pelapor Menolak Hasil",
+          `Pelapor menolak hasil pekerjaan untuk laporan "${requestTitle}". Menunggu tindakan admin.`,
+          requestId);
+      }
+      break;
+
+    case "REOPENED":
+      await createNotification(env, reporterId, "REOPENED",
+        "Laporan Dibuka Ulang",
+        `Laporan "${requestTitle}" telah dibuka ulang oleh administrator.`,
+        requestId);
+      for (const t of technicians.results) {
+        await createNotification(env, t.technician_id, "STATUS_CHANGE",
+          "Laporan Dibuka Ulang",
+          `Laporan "${requestTitle}" telah dibuka ulang dan perlu ditindaklanjuti.`,
+          requestId);
+      }
+      break;
+
+    case "CANCELLED":
+      // FR-034: Pelapor membatalkan laporan → notifikasi admin
+      for (const a of admins.results) {
+        await createNotification(env, a.id, "STATUS_CHANGE",
+          "Laporan Dibatalkan Pelapor",
+          `Laporan "${requestTitle}" telah dibatalkan oleh pelapor.`,
+          requestId);
+      }
+      break;
+  }
+}
+
 async function runAutoClose(env: Env): Promise<void> {
   const expired = await env.DB.prepare(`
     SELECT id FROM service_requests
@@ -45,6 +217,7 @@ async function runAutoClose(env: Env): Promise<void> {
       WHERE id = ?
     `).bind(req.id).run();
     await recordStatusHistory(env, req.id, "WAITING_REPORTER_CONFIRMATION", "CLOSED_AUTO", null, "Batas waktu 45 menit konfirmasi telah habis");
+    await notifyStatusChange(env, req.id, "CLOSED_AUTO", null);
   }
 }
 
@@ -184,6 +357,7 @@ export default {
       `).bind(input.reason.trim(), requestId).run();
 
       await recordStatusHistory(env, requestId, checkRequest.status, "REJECTED", currentUser.id, input.reason.trim());
+      await notifyStatusChange(env, requestId, "REJECTED", currentUser.id);
 
       return json({ success: true, status: "REJECTED" }, 200);
     }
@@ -345,6 +519,7 @@ export default {
 
       await recordStatusHistory(env, requestId, "IN_PROGRESS", "RESOLVED", currentUser.id, null);
       await recordStatusHistory(env, requestId, "RESOLVED", "WAITING_REPORTER_CONFIRMATION", null, null);
+      await notifyStatusChange(env, requestId, "WAITING_REPORTER_CONFIRMATION", currentUser.id);
 
       return json({ success: true, status: "WAITING_REPORTER_CONFIRMATION" }, 200);
     }
@@ -382,6 +557,7 @@ export default {
       `).bind(requestId).run();
 
       await recordStatusHistory(env, requestId, "WAITING_REPORTER_CONFIRMATION", "CLOSED_REPORTER_CONFIRMED", currentUser.id, null);
+      await notifyStatusChange(env, requestId, "CLOSED_REPORTER_CONFIRMED", currentUser.id);
 
       return json({ success: true, status: "CLOSED_REPORTER_CONFIRMED" }, 200);
     }
@@ -425,6 +601,7 @@ export default {
       `).bind(input.reason.trim(), requestId).run();
 
       await recordStatusHistory(env, requestId, "WAITING_REPORTER_CONFIRMATION", "REOPEN_REQUESTED", currentUser.id, input.reason.trim());
+      await notifyStatusChange(env, requestId, "REOPEN_REQUESTED", currentUser.id);
 
       return json({ success: true, status: "REOPEN_REQUESTED" }, 200);
     }
@@ -460,6 +637,7 @@ export default {
       `).bind(requestId).run();
 
       await recordStatusHistory(env, requestId, checkRequest.status, "CLOSED_ADMIN", currentUser.id, input.reason?.trim() || null);
+      await notifyStatusChange(env, requestId, "CLOSED_ADMIN", currentUser.id);
 
       return json({ success: true, status: "CLOSED_ADMIN" }, 200);
     }
@@ -492,6 +670,7 @@ export default {
       `).bind(requestId).run();
 
       await recordStatusHistory(env, requestId, "REOPEN_REQUESTED", "REOPENED", currentUser.id, null);
+      await notifyStatusChange(env, requestId, "REOPENED", currentUser.id);
 
       return json({ success: true, status: "REOPENED" }, 200);
     }
@@ -601,6 +780,7 @@ export default {
         ).run();
 
         await recordStatusHistory(env, id, null, "SUBMITTED", currentUser.id, null);
+        await notifyStatusChange(env, id, "SUBMITTED", currentUser.id);
 
         return json({
           id,
@@ -654,6 +834,61 @@ export default {
 
         return json({ success: true, id: commentId }, 201);
       }
+    }
+
+    // Endpoint GET /api/notifications - Ambil notifikasi pengguna saat ini
+    if (url.pathname === "/api/notifications" && request.method === "GET") {
+      const result = await env.DB.prepare(`
+        SELECT id, type, title, message, request_id, is_read, read_at, created_at
+        FROM notifications
+        WHERE user_id = ?
+        ORDER BY created_at DESC
+        LIMIT 50
+      `).bind(currentUser.id).all();
+
+      const unreadCount = await env.DB.prepare(`
+        SELECT COUNT(*) AS count FROM notifications
+        WHERE user_id = ? AND is_read = 0
+      `).bind(currentUser.id).first<{ count: number }>();
+
+      return json({
+        data: result.results,
+        unread_count: unreadCount?.count || 0
+      });
+    }
+
+    // Endpoint POST /api/notifications/:id/read - Tandai notifikasi sudah dibaca
+    const notificationReadMatch = url.pathname.match(/^\/api\/notifications\/([a-zA-Z0-9-]+)\/read$/);
+    if (notificationReadMatch && request.method === "POST") {
+      const notificationId = notificationReadMatch[1];
+
+      const notif = await env.DB.prepare(`
+        SELECT id, user_id FROM notifications WHERE id = ?
+      `).bind(notificationId).first<{ id: string; user_id: string }>();
+
+      if (!notif) {
+        return json({ error: "Notifikasi tidak ditemukan." }, 404);
+      }
+
+      if (notif.user_id !== currentUser.id) {
+        return json({ error: "Anda hanya dapat menandai notifikasi milik sendiri." }, 403);
+      }
+
+      await env.DB.prepare(`
+        UPDATE notifications SET is_read = 1, read_at = CURRENT_TIMESTAMP WHERE id = ?
+      `).bind(notificationId).run();
+
+      return json({ success: true });
+    }
+
+    // Endpoint POST /api/notifications/read-all - Tandai semua notifikasi sudah dibaca
+    if (url.pathname === "/api/notifications/read-all" && request.method === "POST") {
+      await env.DB.prepare(`
+        UPDATE notifications SET is_read = 1, read_at = CURRENT_TIMESTAMP
+        WHERE user_id = ? AND is_read = 0
+      `).bind(currentUser.id).run();
+
+      return json({ success: true });
     }
 
     return json({ error: "Alamat API tidak ditemukan." }, 404);

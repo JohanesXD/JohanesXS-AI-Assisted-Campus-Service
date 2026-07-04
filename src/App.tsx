@@ -51,6 +51,17 @@ type CommentItem = {
   author_role: string;
 };
 
+type NotificationItem = {
+  id: string;
+  type: string;
+  title: string;
+  message: string;
+  request_id: string | null;
+  is_read: number;
+  read_at: string | null;
+  created_at: string;
+};
+
 type UserSession = {
 
   id: string;
@@ -143,6 +154,66 @@ export default function App() {
   const [rejectResolutionReason, setRejectResolutionReason] = useState("");
   const [closureMessage, setClosureMessage] = useState("");
   const [confirmLoading, setConfirmLoading] = useState(false);
+
+  // Notification States
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [showNotifications, setShowNotifications] = useState(false);
+
+  async function fetchNotifications() {
+    if (!user) return;
+    try {
+      const res = await fetch("/api/notifications", {
+        headers: { "X-User-Email": user.campus_email, "X-User-Role": user.role }
+      });
+      const data = await res.json();
+      if (data.data) {
+        setNotifications(data.data);
+        setUnreadCount(data.unread_count || 0);
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  useEffect(() => {
+    if (user) {
+      fetchNotifications();
+      const interval = setInterval(fetchNotifications, 30000);
+      return () => clearInterval(interval);
+    }
+  }, [user]);
+
+  async function handleMarkAsRead(notifId: string) {
+    if (!user) return;
+    try {
+      await fetch(`/api/notifications/${notifId}/read`, {
+        method: "POST",
+        headers: { "X-User-Email": user.campus_email, "X-User-Role": user.role }
+      });
+      setNotifications(prev => prev.map(n =>
+        n.id === notifId ? { ...n, is_read: 1, read_at: new Date().toISOString() } : n
+      ));
+      setUnreadCount(prev => Math.max(0, prev - 1));
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  async function handleMarkAllAsRead() {
+    if (!user) return;
+    try {
+      await fetch("/api/notifications/read-all", {
+        method: "POST",
+        headers: { "X-User-Email": user.campus_email, "X-User-Role": user.role }
+      });
+      setNotifications(prev => prev.map(n => ({ ...n, is_read: 1, read_at: new Date().toISOString() })));
+      setUnreadCount(0);
+    } catch (e) {
+      // ignore
+    }
+  }
+
   // Admin Action States
 
   const [selectedRequest, setSelectedRequest] = useState<ServiceRequest | null>(null);
@@ -965,6 +1036,68 @@ export default function App() {
 
             <div style={{ fontSize: 13, color: "var(--text)" }}>{user.campus_email}</div>
 
+          </div>
+
+          <div style={{ position: "relative" }}>
+            <button onClick={() => setShowNotifications(!showNotifications)} className="notif-bell">
+              &#128276;
+              {unreadCount > 0 && <span className="notif-badge">{unreadCount > 99 ? "99+" : unreadCount}</span>}
+            </button>
+
+            {showNotifications && (
+              <div className="notif-dropdown">
+                <div className="notif-header">
+                  <span>Notifikasi</span>
+                  {unreadCount > 0 && (
+                    <button onClick={handleMarkAllAsRead} className="notif-mark-all">
+                      Tandai semua dibaca
+                    </button>
+                  )}
+                </div>
+                {notifications.length === 0 ? (
+                  <div className="notif-empty">Belum ada notifikasi.</div>
+                ) : (
+                  notifications.map(n => (
+                    <div
+                      key={n.id}
+                      className={`notif-item${n.is_read ? "" : " unread"}`}
+                      onClick={() => {
+                        if (!n.is_read) handleMarkAsRead(n.id);
+                        if (n.request_id) {
+                          setShowNotifications(false);
+                          const found = requests.find(r => r.id === n.request_id);
+                          if (found) {
+                            handleSelectRequest(found);
+                          } else {
+                            setDetailMessage("");
+                            setSelectedRequestDetail(null);
+                            setStatusHistory([]);
+                            setComments([]);
+                            loadRequestDetail(n.request_id);
+                            loadStatusHistory(n.request_id);
+                            loadComments(n.request_id);
+                          }
+                        }
+                      }}
+                    >
+                      <div className="notif-icon">
+                        {n.type === "STATUS_CHANGE" ? "&#128204;" :
+                         n.type === "RESOLVED" ? "&#9989;" :
+                         n.type === "WAITING_PARTS" ? "&#128295;" :
+                         n.type === "NEED_HELP" ? "&#128170;" :
+                         n.type === "PAUSED" ? "&#9200;" :
+                         n.type === "REOPENED" ? "&#128257;" : "&#128276;"}
+                      </div>
+                      <div className="notif-content">
+                        <div className="notif-title">{n.title}</div>
+                        <div className="notif-message">{n.message}</div>
+                        <div className="notif-time">{new Date(n.created_at).toLocaleString("id-ID")}</div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
           </div>
 
           <span className="role-badge">{user.role}</span>
