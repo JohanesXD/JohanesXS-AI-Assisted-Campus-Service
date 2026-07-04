@@ -12,6 +12,8 @@ type ServiceRequest = {
   status: string;
   urgency: string;
   rejection_reason?: string;
+  created_at?: string;
+  updated_at?: string;
 };
 
 type UserSession = {
@@ -31,6 +33,24 @@ type Room = {
   building: string;
   floor: string;
   room_name: string;
+};
+
+type StatusHistoryItem = {
+  id: string;
+  from_status: string | null;
+  to_status: string;
+  reason: string | null;
+  created_at: string;
+  changed_by_name: string;
+  changed_by_role: string;
+};
+
+type CommentItem = {
+  id: string;
+  comment: string;
+  created_at: string;
+  author_name: string;
+  author_role: string;
 };
 
 export default function App() {
@@ -57,6 +77,13 @@ export default function App() {
   const [selectedBuilding, setSelectedBuilding] = useState("");
   const [selectedFloor, setSelectedFloor] = useState("");
   const [selectedRoomId, setSelectedRoomId] = useState("");
+
+  // Reporter Detail & Comment States
+  const [selectedRequestDetail, setSelectedRequestDetail] = useState<ServiceRequest | null>(null);
+  const [statusHistory, setStatusHistory] = useState<StatusHistoryItem[]>([]);
+  const [comments, setComments] = useState<CommentItem[]>([]);
+  const [newComment, setNewComment] = useState("");
+  const [detailMessage, setDetailMessage] = useState("");
 
   // Admin Action States
   const [selectedRequest, setSelectedRequest] = useState<ServiceRequest | null>(null);
@@ -224,6 +251,96 @@ export default function App() {
     setRejectionReasonInput("");
     setAdminError("");
     setAdminSuccess("");
+    setSelectedRequestDetail(null);
+    setStatusHistory([]);
+    setComments([]);
+    setNewComment("");
+    setDetailMessage("");
+    setMessage("");
+  }
+
+  async function loadRequestDetail(requestId: string) {
+    if (!user) return;
+    try {
+      const response = await fetch(`/api/requests/${requestId}`, {
+        headers: { "X-User-Email": user.campus_email, "X-User-Role": user.role }
+      });
+      if (!response.ok) return;
+      const result = await response.json();
+      setSelectedRequestDetail(result.data ?? null);
+    } catch (e) {
+      console.error("Gagal memuat detail laporan", e);
+    }
+  }
+
+  async function loadStatusHistory(requestId: string) {
+    if (!user) return;
+    try {
+      const response = await fetch(`/api/requests/${requestId}/status-history`, {
+        headers: { "X-User-Email": user.campus_email, "X-User-Role": user.role }
+      });
+      if (!response.ok) return;
+      const result = await response.json();
+      setStatusHistory(result.data ?? []);
+    } catch (e) {
+      console.error("Gagal memuat riwayat status", e);
+    }
+  }
+
+  async function loadComments(requestId: string) {
+    if (!user) return;
+    try {
+      const response = await fetch(`/api/requests/${requestId}/comments`, {
+        headers: { "X-User-Email": user.campus_email, "X-User-Role": user.role }
+      });
+      if (!response.ok) return;
+      const result = await response.json();
+      setComments(result.data ?? []);
+    } catch (e) {
+      console.error("Gagal memuat komentar", e);
+    }
+  }
+
+  async function handleSelectRequest(item: ServiceRequest) {
+    setDetailMessage("");
+    setSelectedRequestDetail(null);
+    setStatusHistory([]);
+    setComments([]);
+    setNewComment("");
+    await Promise.all([
+      loadRequestDetail(item.id),
+      loadStatusHistory(item.id),
+      loadComments(item.id),
+    ]);
+  }
+
+  async function handleAddComment(requestId: string) {
+    if (!user) return;
+    if (!newComment.trim()) {
+      setDetailMessage("Komentar tidak boleh kosong.");
+      return;
+    }
+    try {
+      const response = await fetch(`/api/requests/${requestId}/comments`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-User-Email": user.campus_email,
+          "X-User-Role": user.role
+        },
+        body: JSON.stringify({ comment: newComment })
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        setDetailMessage(result.error ?? "Gagal menambahkan komentar.");
+        return;
+      }
+      setNewComment("");
+      setDetailMessage("Komentar berhasil ditambahkan.");
+      await loadComments(requestId);
+    } catch (e) {
+      setDetailMessage("Koneksi terputus. Gagal mengirim komentar.");
+    }
   }
 
   async function handleReject(requestId: string) {
@@ -505,7 +622,7 @@ export default function App() {
                   </thead>
                   <tbody>
                     {requests.map((item) => (
-                      <tr key={item.id}>
+                      <tr key={item.id} style={{ cursor: "pointer" }} onClick={() => handleSelectRequest(item)}>
                         <td><code>{item.request_number}</code></td>
                         <td>{item.title}</td>
                         <td style={{ fontSize: 13 }}>{item.location}</td>
@@ -522,6 +639,128 @@ export default function App() {
                     ))}
                   </tbody>
                 </table>
+              )}
+
+              {selectedRequestDetail && (
+                <div style={{ marginTop: 32 }}>
+                  <h2>Detail Laporan</h2>
+                  <div className="premium-card" style={{ maxWidth: "100%", padding: 24, background: "var(--social-bg)" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+                      <div>
+                        <code style={{ fontSize: 14 }}>{selectedRequestDetail.request_number}</code>
+                        <div style={{ fontSize: 13, color: "var(--text)", marginTop: 4 }}>
+                          Dibuat: {selectedRequestDetail.created_at}
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <span className="role-badge" style={{ fontSize: 11 }}>{selectedRequestDetail.urgency}</span>
+                        <span className={`status-indicator ${selectedRequestDetail.status.toLowerCase() === 'submitted' ? 'submitted' : 'progress'}`}>
+                          {selectedRequestDetail.status}
+                        </span>
+                      </div>
+                    </div>
+
+                    <h3 style={{ margin: "0 0 16px", color: "var(--text-h)", fontSize: 20 }}>{selectedRequestDetail.title}</h3>
+
+                    <div style={{ marginBottom: 16 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", textTransform: "uppercase", letterSpacing: 0.5 }}>Lokasi</div>
+                      <div style={{ color: "var(--text-h)", fontSize: 15 }}>{selectedRequestDetail.location}</div>
+                    </div>
+
+                    <div style={{ marginBottom: 16 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", textTransform: "uppercase", letterSpacing: 0.5 }}>Kategori</div>
+                      <div style={{ color: "var(--text-h)", fontSize: 15 }}>{selectedRequestDetail.category}</div>
+                    </div>
+
+                    <div style={{ marginBottom: 20 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", textTransform: "uppercase", letterSpacing: 0.5 }}>Deskripsi</div>
+                      <div style={{ color: "var(--text-h)", fontSize: 14, background: "var(--bg)", padding: 12, borderRadius: 6, border: "1px solid var(--border)", whiteSpace: "pre-line" }}>
+                        {selectedRequestDetail.description}
+                      </div>
+                    </div>
+
+                    {/* Status Timeline */}
+                    <div style={{ marginBottom: 24 }}>
+                      <h4 style={{ margin: "0 0 12px", color: "var(--text-h)", fontSize: 16 }}>Riwayat Status</h4>
+                      {statusHistory.length === 0 ? (
+                        <p style={{ color: "var(--text)", fontSize: 14 }}>Belum ada riwayat status.</p>
+                      ) : (
+                        <div style={{ position: "relative", paddingLeft: 24 }}>
+                          <div style={{ position: "absolute", left: 8, top: 4, bottom: 4, width: 2, background: "var(--border)" }} />
+                          {statusHistory.map((sh) => (
+                            <div key={sh.id} style={{ position: "relative", marginBottom: 16, paddingLeft: 16 }}>
+                              <div style={{ position: "absolute", left: -20, top: 4, width: 12, height: 12, borderRadius: "50%", background: "var(--accent)", border: "2px solid var(--bg)" }} />
+                              <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-h)" }}>
+                                {sh.from_status ? `${sh.from_status} → ${sh.to_status}` : sh.to_status}
+                              </div>
+                              <div style={{ fontSize: 12, color: "var(--text)", marginTop: 2 }}>
+                                {sh.changed_by_name} ({sh.changed_by_role})
+                              </div>
+                              <div style={{ fontSize: 11, color: "var(--text)", marginTop: 1 }}>{sh.created_at}</div>
+                              {sh.reason && (
+                                <div style={{ fontSize: 13, color: "var(--text-h)", marginTop: 4, padding: 8, background: "var(--bg)", borderRadius: 4, border: "1px solid var(--border)" }}>
+                                  {sh.reason}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Comments Thread */}
+                    <div style={{ marginBottom: 24 }}>
+                      <h4 style={{ margin: "0 0 12px", color: "var(--text-h)", fontSize: 16 }}>Komentar</h4>
+
+                      {detailMessage && (
+                        <div className={detailMessage.startsWith("Komentar berhasil") ? "alert-success" : "alert-error"} style={{ marginBottom: 12 }}>
+                          {detailMessage}
+                        </div>
+                      )}
+
+                      {comments.length === 0 ? (
+                        <p style={{ color: "var(--text)", fontSize: 14, marginBottom: 16 }}>Belum ada komentar.</p>
+                      ) : (
+                        <div style={{ marginBottom: 16 }}>
+                          {comments.map((c) => (
+                            <div key={c.id} style={{ marginBottom: 12, padding: 12, background: "var(--bg)", borderRadius: 6, border: "1px solid var(--border)" }}>
+                              <div style={{ fontSize: 14, color: "var(--text-h)", whiteSpace: "pre-line" }}>{c.comment}</div>
+                              <div style={{ fontSize: 11, color: "var(--text)", marginTop: 6 }}>
+                                {c.author_name} ({c.author_role}) — {c.created_at}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <input
+                          type="text"
+                          value={newComment}
+                          onChange={(e) => setNewComment(e.target.value)}
+                          placeholder="Tulis komentar..."
+                          className="form-input"
+                          style={{ flex: 1 }}
+                        />
+                        <button
+                          onClick={() => handleAddComment(selectedRequestDetail.id)}
+                          className="btn-primary"
+                          style={{ width: "auto", paddingInline: 20, whiteSpace: "nowrap" }}
+                        >
+                          Kirim
+                        </button>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => { setSelectedRequestDetail(null); setStatusHistory([]); setComments([]); setNewComment(""); setDetailMessage(""); }}
+                      className="btn-logout"
+                      style={{ width: "100%" }}
+                    >
+                      Tutup Detail
+                    </button>
+                  </div>
+                </div>
               )}
             </div>
           </div>
