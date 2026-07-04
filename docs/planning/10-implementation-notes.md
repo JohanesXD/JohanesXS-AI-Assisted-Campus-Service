@@ -32,8 +32,8 @@ Closes #7
    - Test mencakup: validasi technician_id, validasi status NEED_HELP, pencegahan duplikasi teknisi.
 
 ## Test
-* [x] Test dijalankan
-* [x] Build berhasil
+* [x] Test dijalankan (23 test passed, 6 file)
+* [x] Build berhasil (`tsc -b && vite build`)
 * [x] Dicoba di browser
 
 ## Penggunaan AI
