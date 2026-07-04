@@ -122,6 +122,18 @@ export default {
       return json({ data: result.results });
     }
 
+    // Endpoint GET /api/users/technicians
+    if (url.pathname === "/api/users/technicians" && request.method === "GET") {
+      if (currentUser.role !== "ADMIN") {
+        return json({ error: "Hanya administrator (ADMIN) yang dapat melihat daftar teknisi." }, 403);
+      }
+
+      const result = await env.DB.prepare(`
+        SELECT id, campus_email, name FROM users WHERE role = 'TECHNICIAN' AND is_active = 1 ORDER BY name ASC
+      `).all();
+      return json({ data: result.results });
+    }
+
     // Endpoint POST /api/requests/:id/reject
     const rejectMatch = url.pathname.match(/^\/api\/requests\/([a-zA-Z0-9-]+)\/reject$/);
     if (rejectMatch && request.method === "POST") {
@@ -208,70 +220,76 @@ export default {
       return json({ data: result.results }, 200);
     }
 
-    // GET/POST /api/requests/:id/comments
-    const commentsMatch = url.pathname.match(/^\/api\/requests\/([a-zA-Z0-9-]+)\/comments$/);
-    if (commentsMatch) {
-      const requestId = commentsMatch[1];
-
-      // GET /api/requests/:id/comments
-      if (request.method === "GET") {
-        const result = await env.DB.prepare(`
-          SELECT rc.id, rc.comment, rc.created_at,
-                 u.name AS author_name, u.role AS author_role
-          FROM request_comments rc
-          JOIN users u ON rc.author_id = u.id
-          WHERE rc.request_id = ?
-          ORDER BY rc.created_at ASC
-        `).bind(requestId).all();
-
-        return json({ data: result.results }, 200);
+    // Endpoint POST /api/requests/:id/assign-additional
+    const assignAdditionalMatch = url.pathname.match(/^\/api\/requests\/([a-zA-Z0-9-]+)\/assign-additional$/);
+    if (assignAdditionalMatch && request.method === "POST") {
+      if (currentUser.role !== "ADMIN") {
+        return json({ error: "Hanya administrator (ADMIN) yang dapat menambahkan teknisi tambahan." }, 403);
       }
 
-      // POST /api/requests/:id/comments
-      if (request.method === "POST") {
-        const input = await request.json() as { comment?: string };
+      const requestId = assignAdditionalMatch[1];
+      const input = await request.json() as {
+        technician_id?: string;
+        reason?: string;
+      };
 
-        if (!input.comment || input.comment.trim().length === 0) {
-          return json({ error: "Komentar tidak boleh kosong." }, 422);
-        }
-
-        // Verify the request exists
-        const checkRequest = await env.DB.prepare(`
-          SELECT id FROM service_requests WHERE id = ?
-        `).bind(requestId).first();
-
-        if (!checkRequest) {
-          return json({ error: "Laporan tidak ditemukan." }, 404);
-        }
-
-        // Verify reporter can only comment on own requests
-        if (currentUser.role === "REPORTER") {
-          const ownerEmail = await env.DB.prepare(`
-            SELECT campus_email FROM users WHERE id = (SELECT reporter_id FROM service_requests WHERE id = ?)
-          `).bind(requestId).first<string>("campus_email");
-
-          if (ownerEmail && ownerEmail !== currentUser.campus_email) {
-            return json({ error: "Anda hanya dapat memberi komentar pada laporan milik sendiri." }, 403);
-          }
-        }
-
-        const commentId = crypto.randomUUID();
-
-        await env.DB.prepare(`
-          INSERT INTO request_comments (id, request_id, author_id, comment)
-          VALUES (?, ?, ?, ?)
-        `).bind(commentId, requestId, currentUser.id, input.comment.trim()).run();
-
-        const newComment = await env.DB.prepare(`
-          SELECT rc.id, rc.comment, rc.created_at,
-                 u.name AS author_name, u.role AS author_role
-          FROM request_comments rc
-          JOIN users u ON rc.author_id = u.id
-          WHERE rc.id = ?
-        `).bind(commentId).first();
-
-        return json({ data: newComment }, 201);
+      if (!input.technician_id) {
+        return json({ error: "Teknisi wajib dipilih." }, 422);
       }
+
+      // Pastikan laporan ada
+      const checkRequest = await env.DB.prepare(`
+        SELECT id, status FROM service_requests WHERE id = ?
+      `).bind(requestId).first<{ id: string; status: string }>();
+
+      if (!checkRequest) {
+        return json({ error: "Laporan tidak ditemukan." }, 404);
+      }
+
+      // Validasi: hanya boleh tambah teknisi jika status NEED_HELP
+      if (checkRequest.status !== "NEED_HELP") {
+        return json({ error: "Hanya laporan berstatus NEED_HELP yang dapat ditambahkan teknisi tambahan." }, 422);
+      }
+
+      // Pastikan teknisi ada dan role TECHNICIAN
+      const checkTechnician = await env.DB.prepare(`
+        SELECT id, role FROM users WHERE id = ? AND role = 'TECHNICIAN' AND is_active = 1
+      `).bind(input.technician_id).first<{ id: string; role: string }>();
+
+      if (!checkTechnician) {
+        return json({ error: "Teknisi tidak valid atau tidak aktif." }, 422);
+      }
+
+      // Cek apakah teknisi sudah ditugaskan ke laporan ini
+      const existingAssignment = await env.DB.prepare(`
+        SELECT id FROM request_assignments WHERE request_id = ? AND technician_id = ? AND status = 'ACTIVE'
+      `).bind(requestId, input.technician_id).first<{ id: string }>();
+
+      if (existingAssignment) {
+        return json({ error: "Teknisi ini sudah ditugaskan ke laporan." }, 422);
+      }
+
+      // Buat assignment tambahan
+      const assignmentId = crypto.randomUUID();
+      await env.DB.prepare(`
+        INSERT INTO request_assignments
+        (id, request_id, technician_id, assignment_type, status, assigned_by_user_id, reason, created_at, updated_at)
+        VALUES (?, ?, ?, 'ADDITIONAL', 'ACTIVE', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      `).bind(
+        assignmentId,
+        requestId,
+        input.technician_id,
+        currentUser.id,
+        input.reason?.trim() || null
+      ).run();
+
+      return json({
+        success: true,
+        assignmentId,
+        requestId,
+        technicianId: input.technician_id,
+        assignmentType: "ADDITIONAL"
+      }, 201);
     }
 
     // Endpoint /api/requests
@@ -282,16 +300,25 @@ export default {
         let query = `
           SELECT sr.id, sr.request_number, sr.title, sr.description, sr.status, sr.urgency, sr.rejection_reason, sr.created_at,
                  c.name AS category,
-                 r.building || ' - ' || r.floor || ' - ' || r.room_name AS location
+                 r.building || ' - ' || r.floor || ' - ' || r.room_name AS location,
+                 u_tech.name AS technician_name
           FROM service_requests sr
           JOIN categories c ON sr.category_id = c.id
           JOIN rooms r ON sr.room_id = r.id
+          LEFT JOIN request_assignments ra ON sr.id = ra.request_id AND ra.status = 'ACTIVE'
+          LEFT JOIN users u_tech ON ra.technician_id = u_tech.id
         `;
         let params: string[] = [];
 
         // Jika Reporter, filter hanya laporan miliknya sendiri
         if (currentUser.role === "REPORTER") {
           query += " WHERE sr.reporter_id = ?";
+          params.push(currentUser.id);
+        }
+
+        // Jika Teknisi, filter hanya tugas yang diberikan kepadanya
+        if (currentUser.role === "TECHNICIAN") {
+          query += " WHERE ra.technician_id = ? AND ra.status = 'ACTIVE'";
           params.push(currentUser.id);
         }
 
@@ -376,6 +403,52 @@ export default {
           requestNumber,
           status: "SUBMITTED"
         }, 201);
+      }
+    }
+
+    // Endpoint GET & POST /api/requests/:id/comments
+    const commentsMatch = url.pathname.match(/^\/api\/requests\/([a-zA-Z0-9-]+)\/comments$/);
+    if (commentsMatch) {
+      const requestId = commentsMatch[1];
+
+      // Pastikan laporan ada
+      const checkRequest = await env.DB.prepare(`
+        SELECT id, reporter_id FROM service_requests WHERE id = ?
+      `).bind(requestId).first<{ id: string; reporter_id: string }>();
+
+      if (!checkRequest) {
+        return json({ error: "Laporan tidak ditemukan." }, 404);
+      }
+
+      // GET /api/requests/:id/comments
+      if (request.method === "GET") {
+        const result = await env.DB.prepare(`
+          SELECT rc.id, rc.content, rc.created_at, u.name AS author_name, u.role AS author_role
+          FROM request_comments rc
+          JOIN users u ON rc.user_id = u.id
+          WHERE rc.request_id = ?
+          ORDER BY rc.created_at ASC
+        `).bind(requestId).all();
+
+        return json({ data: result.results });
+      }
+
+      // POST /api/requests/:id/comments
+      if (request.method === "POST") {
+        const input = await request.json() as { content?: string };
+
+        if (!input.content || input.content.trim().length < 5) {
+          return json({ error: "Komentar wajib diisi (minimal 5 karakter)." }, 422);
+        }
+
+        const commentId = `cmt-${crypto.randomUUID()}`;
+
+        await env.DB.prepare(`
+          INSERT INTO request_comments (id, request_id, user_id, content)
+          VALUES (?, ?, ?, ?)
+        `).bind(commentId, requestId, currentUser.id, input.content.trim()).run();
+
+        return json({ success: true, id: commentId }, 201);
       }
     }
 

@@ -8,17 +8,17 @@ Closes #8
 - **AC:** AC-015 (Pelapor dapat melihat status saat ini dan riwayat perpindahan status pada detail laporan), AC-016 (Pelapor dapat menulis komentar baru yang akan langsung muncul pada thread komentar detail laporan).
 
 ## Perubahan
-1. **Database Migration (`database/migrations/0004_reporter_monitoring.sql`)**:
+1. **Database Migration (`database/migrations/0007_status_history.sql`)**:
    - Membuat tabel `request_status_history` untuk menyimpan riwayat perubahan status laporan.
-   - Membuat tabel `request_comments` untuk menyimpan komentar pelapor dan pengguna lain.
-   - Menambahkan index pada `request_id` di kedua tabel.
+   - Tabel `request_comments` sudah dibuat oleh migration `0006_comments.sql` (FR-07).
+   - Menambahkan index pada `request_id` dan `created_at` di `request_status_history`.
 
 2. **Worker API (`worker/index.ts`)**:
    - Menambahkan fungsi `recordStatusHistory()` untuk mencatat riwayat status secara konsisten.
    - **GET `/api/requests/:id`** — Mengembalikan detail laporan lengkap (termasuk kategori, lokasi, pelapor). Reporter hanya bisa melihat laporan miliknya sendiri.
    - **GET `/api/requests/:id/status-history`** — Mengembalikan riwayat status (timeline) dari awal sampai status terkini.
-   - **GET `/api/requests/:id/comments`** — Mengembalikan daftar komentar pada laporan.
-   - **POST `/api/requests/:id/comments`** — Menambahkan komentar baru. Reporter hanya bisa menambah komentar pada laporannya sendiri. Komentar tidak boleh kosong.
+   - **GET `/api/requests/:id/comments`** — Mengembalikan daftar komentar pada laporan (diimplementasikan oleh FR-07, endpoint menggunakan schema `content`/`user_id`).
+   - **POST `/api/requests/:id/comments`** — Menambahkan komentar baru (diimplementasikan oleh FR-07, minimal 5 karakter, ID berformat `cmt-`).
    - Mencatat status history otomatis saat laporan dibuat (`SUBMITTED`) dan saat ditolak (`REJECTED`).
 
 3. **Frontend (`src/App.tsx`)**:
@@ -37,6 +37,7 @@ Closes #8
 
 ## Penggunaan AI
 * **Skill yang digunakan:** `10-implementation`
+<<<<<<< HEAD
 * **Kesalahan AI yang ditemukan:** Tipe `ServiceRequest` tidak memiliki properti `created_at` sehingga menyebabkan error tsc. Variabel `requestRow` tidak digunakan dan menyebabkan warning.
 * **Perbaikan manusia:** Menambahkan `created_at` dan `updated_at` ke tipe `ServiceRequest`, menghapus variabel `requestRow` yang tidak terpakai.
 
