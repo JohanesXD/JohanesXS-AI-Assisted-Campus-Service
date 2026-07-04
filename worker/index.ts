@@ -190,6 +190,16 @@ async function notifyStatusChange(
       }
       break;
 
+    case "EDITED":
+      // FR-032: Notify admins when reporter edits a request
+      for (const a of admins.results) {
+        await createNotification(env, a.id, "STATUS_CHANGE",
+          "Laporan Diubah Pelapor",
+          `Laporan "${requestTitle}" telah diubah oleh pelapor dan perlu ditinjau ulang.`,
+          requestId);
+      }
+      break;
+
     case "CANCELLED":
       // FR-034: Pelapor membatalkan laporan → notifikasi admin
       for (const a of admins.results) {
@@ -414,6 +424,239 @@ export default {
       `).bind(requestId).all();
 
       return json({ data: result.results }, 200);
+    }
+
+    // Endpoint PATCH /api/requests/:id - Pelapor mengubah laporan (FR-031, FR-032, AC-023)
+    const requestEditMatch = url.pathname.match(/^\/api\/requests\/([a-zA-Z0-9-]+)$/);
+    if (requestEditMatch && request.method === "PATCH") {
+      if (currentUser.role !== "REPORTER") {
+        return json({ error: "Hanya pelapor (REPORTER) yang dapat mengubah laporan." }, 403);
+      }
+
+      const requestId = requestEditMatch[1];
+      const input = await request.json() as {
+        title?: string;
+        description?: string;
+        category_id?: string;
+        room_id?: string;
+        urgency?: string;
+        reason?: string;
+      };
+
+      // Validasi: alasan perubahan wajib diisi
+      if (!input.reason || input.reason.trim().length < 5) {
+        return json({ error: "Alasan perubahan wajib diisi (minimal 5 karakter)." }, 422);
+      }
+
+      // Ambil data laporan saat ini dan pastikan milik pelapor
+      const existingRequest = await env.DB.prepare(`
+        SELECT id, reporter_id, title, description, category_id, room_id, urgency, status, request_number
+        FROM service_requests WHERE id = ?
+      `).bind(requestId).first<{
+        id: string; reporter_id: string; title: string; description: string;
+        category_id: string; room_id: string; urgency: string; status: string; request_number: string;
+      }>();
+
+      if (!existingRequest) {
+        return json({ error: "Laporan tidak ditemukan." }, 404);
+      }
+
+      if (existingRequest.reporter_id !== currentUser.id) {
+        return json({ error: "Anda hanya dapat mengubah laporan milik sendiri." }, 403);
+      }
+
+      // Hanya boleh edit jika status masih awal
+      const editableStatuses = ["SUBMITTED", "UNDER_REVIEW", "REJECTED"];
+      if (!editableStatuses.includes(existingRequest.status)) {
+        return json({ error: "Laporan tidak dapat diubah pada status saat ini." }, 422);
+      }
+
+      // Validasi field yang akan diubah
+      const updates: Record<string, unknown> = {};
+      const editRecord: Record<string, unknown> = {
+        id: crypto.randomUUID(),
+        request_id: requestId,
+        edited_by_user_id: currentUser.id,
+        old_title: existingRequest.title,
+        new_title: existingRequest.title,
+        old_description: existingRequest.description,
+        new_description: existingRequest.description,
+        old_category_id: existingRequest.category_id,
+        new_category_id: existingRequest.category_id,
+        old_room_id: existingRequest.room_id,
+        new_room_id: existingRequest.room_id,
+        old_urgency: existingRequest.urgency,
+        new_urgency: existingRequest.urgency,
+        reason: input.reason.trim(),
+      };
+
+      if (input.title !== undefined) {
+        const trimmed = input.title.trim();
+        if (!trimmed) {
+          return json({ error: "Judul tidak boleh kosong." }, 422);
+        }
+        updates.title = trimmed;
+        editRecord.new_title = trimmed;
+      }
+
+      if (input.description !== undefined) {
+        const trimmed = input.description.trim();
+        if (trimmed.length < 20) {
+          return json({ error: "Deskripsi minimal 20 karakter." }, 422);
+        }
+        updates.description = trimmed;
+        editRecord.new_description = trimmed;
+      }
+
+      if (input.category_id !== undefined) {
+        const categoryExists = await env.DB.prepare(`
+          SELECT id FROM categories WHERE id = ? AND is_active = 1
+        `).bind(input.category_id).first();
+        if (!categoryExists) {
+          return json({ error: "Kategori tidak valid." }, 422);
+        }
+        updates.category_id = input.category_id;
+        editRecord.new_category_id = input.category_id;
+      }
+
+      if (input.room_id !== undefined) {
+        const roomExists = await env.DB.prepare(`
+          SELECT id FROM rooms WHERE id = ? AND is_active = 1
+        `).bind(input.room_id).first();
+        if (!roomExists) {
+          return json({ error: "Ruangan tidak valid." }, 422);
+        }
+        updates.room_id = input.room_id;
+        editRecord.new_room_id = input.room_id;
+      }
+
+      if (input.urgency !== undefined) {
+        if (!["LOW", "MEDIUM", "HIGH", "URGENT"].includes(input.urgency)) {
+          return json({ error: "Tingkat urgensi tidak valid." }, 422);
+        }
+        updates.urgency = input.urgency;
+        editRecord.new_urgency = input.urgency;
+      }
+
+      // Jika tidak ada field yang diubah
+      if (Object.keys(updates).length === 0) {
+        return json({ error: "Tidak ada field yang diubah." }, 422);
+      }
+
+      // Update laporan: kembalikan status ke UNDER_REVIEW dan hapus rejection_reason jika ada
+      const newStatus = "UNDER_REVIEW";
+      const oldStatus = existingRequest.status;
+
+      await env.DB.prepare(`
+        UPDATE service_requests
+        SET title = COALESCE(?, title),
+            description = COALESCE(?, description),
+            category_id = COALESCE(?, category_id),
+            room_id = COALESCE(?, room_id),
+            urgency = COALESCE(?, urgency),
+            status = ?,
+            rejection_reason = CASE WHEN ? = 'REJECTED' THEN NULL ELSE rejection_reason END,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).bind(
+        updates.title ?? null,
+        updates.description ?? null,
+        updates.category_id ?? null,
+        updates.room_id ?? null,
+        updates.urgency ?? null,
+        newStatus,
+        oldStatus,
+        requestId
+      ).run();
+
+      // Simpan riwayat perubahan ke request_edits
+      await env.DB.prepare(`
+        INSERT INTO request_edits
+        (id, request_id, edited_by_user_id, old_title, new_title, old_description, new_description,
+         old_category_id, new_category_id, old_room_id, new_room_id, old_urgency, new_urgency, reason)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).bind(
+        editRecord.id,
+        editRecord.request_id,
+        editRecord.edited_by_user_id,
+        editRecord.old_title,
+        editRecord.new_title,
+        editRecord.old_description,
+        editRecord.new_description,
+        editRecord.old_category_id,
+        editRecord.new_category_id,
+        editRecord.old_room_id,
+        editRecord.new_room_id,
+        editRecord.old_urgency,
+        editRecord.new_urgency,
+        editRecord.reason
+      ).run();
+
+      // Catat perubahan status di history
+      await recordStatusHistory(env, requestId, oldStatus, newStatus, currentUser.id, `Diedit pelapor: ${input.reason.trim()}`);
+
+      // Kirim notifikasi ke admin bahwa laporan diedit
+      await notifyStatusChange(env, requestId, "EDITED", currentUser.id);
+
+      return json({
+        success: true,
+        status: newStatus,
+        message: "Laporan berhasil diubah dan dikembalikan ke pemeriksaan admin."
+      }, 200);
+    }
+
+    // Endpoint POST /api/requests/:id/cancel - Pelapor membatalkan laporan (FR-034, AC-022)
+    const requestCancelMatch = url.pathname.match(/^\/api\/requests\/([a-zA-Z0-9-]+)\/cancel$/);
+    if (requestCancelMatch && request.method === "POST") {
+      if (currentUser.role !== "REPORTER") {
+        return json({ error: "Hanya pelapor (REPORTER) yang dapat membatalkan laporan." }, 403);
+      }
+
+      const requestId = requestCancelMatch[1];
+      const input = await request.json() as { reason?: string };
+
+      // Validasi: alasan pembatalan wajib diisi
+      if (!input.reason || input.reason.trim().length < 5) {
+        return json({ error: "Alasan pembatalan wajib diisi (minimal 5 karakter)." }, 422);
+      }
+
+      // Ambil data laporan dan pastikan milik pelapor
+      const existingRequest = await env.DB.prepare(`
+        SELECT id, reporter_id, status, title FROM service_requests WHERE id = ?
+      `).bind(requestId).first<{ id: string; reporter_id: string; status: string; title: string }>();
+
+      if (!existingRequest) {
+        return json({ error: "Laporan tidak ditemukan." }, 404);
+      }
+
+      if (existingRequest.reporter_id !== currentUser.id) {
+        return json({ error: "Anda hanya dapat membatalkan laporan milik sendiri." }, 403);
+      }
+
+      // Hanya boleh cancel jika status masih awal
+      const cancellableStatuses = ["SUBMITTED", "UNDER_REVIEW", "REJECTED"];
+      if (!cancellableStatuses.includes(existingRequest.status)) {
+        return json({ error: "Laporan tidak dapat dibatalkan pada status saat ini." }, 422);
+      }
+
+      // Update status ke CANCELLED
+      await env.DB.prepare(`
+        UPDATE service_requests
+        SET status = 'CANCELLED', updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).bind(requestId).run();
+
+      // Catat perubahan status
+      await recordStatusHistory(env, requestId, existingRequest.status, "CANCELLED", currentUser.id, input.reason.trim());
+
+      // Kirim notifikasi ke admin
+      await notifyStatusChange(env, requestId, "CANCELLED", currentUser.id);
+
+      return json({
+        success: true,
+        status: "CANCELLED",
+        message: "Laporan berhasil dibatalkan."
+      }, 200);
     }
 
     // Endpoint POST /api/requests/:id/assign-additional
