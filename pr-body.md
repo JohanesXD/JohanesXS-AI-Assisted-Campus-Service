@@ -1,20 +1,25 @@
 ## Issue
-Closes #12
+Closes #13
 
 ## Requirement
-- FR-038: Sistem harus mengizinkan administrator mengedit kategori, lokasi, atau deskripsi laporan sebelum menugaskan teknisi dengan menyertakan alasan.
-- FR-039: Sistem harus mengizinkan administrator menggabungkan laporan duplikat.
-- FR-040: Sistem harus mengizinkan administrator mengganti teknisi setelah laporan berjalan dengan persetujuan teknisi lama dan teknisi baru.
+- FR-024: Sistem harus menyediakan dashboard untuk Manajer Fasilitas.
+- FR-025: Dashboard harus menampilkan total masalah yang sudah diselesaikan.
+- FR-026: Dashboard harus menampilkan chart kategori masalah yang paling sering muncul.
+- FR-027: Dashboard harus dapat difilter atau diurutkan berdasarkan terbaru, terlama, ruangan, dan kategori.
+- FR-028: Sistem harus menyediakan laporan ringkas untuk Manajer Fasilitas.
+- FR-029: Laporan ringkas harus mengandung ruangan masalah dan kategori masalah.
+- FR-042: Sistem harus mengizinkan laporan ringkas diunduh (format CSV).
+- FR-043: Sistem harus mengizinkan Manajer Fasilitas memberi catatan tindak lanjut dengan menyertakan alasan.
 
 ## Acceptance Criteria
-- AC-024: Admin dapat menggabungkan laporan duplikat ke laporan utama (menghubungkan id laporan duplikat ke laporan utama).
-- AC-025: Penggantian teknisi di tengah jalan memerlukan konfirmasi persetujuan (approved) dari teknisi lama dan teknisi baru sebelum assignment baru aktif.
+- AC-026: Manajer Fasilitas dapat memfilter dashboard berdasarkan waktu, ruangan, dan kategori serta mengunduh data laporan ringkas ke format file CSV.
+- AC-027: Manajer Fasilitas dapat menambahkan catatan tindak lanjut dengan alasan wajib pada laporan yang telah ditinjau.
 
 ## Perubahan
-- Migration 0012: menambahkan kolom `duplicate_of_id` di tabel `service_requests`.
-- Worker: endpoint `/api/admin/requests/:id/edit` (edit admin), `/api/admin/requests/:id/merge` (merge laporan), `/api/admin/requests/:id/reassign` (reassign request), dan `/api/requests/:id/reassign/approve` (persetujuan teknisi).
-- Frontend: Tab Antrean Review vs Semua Laporan untuk Admin, panel edit detail, tombol & modal merge duplikat, tombol & modal reassign teknisi, serta panel persetujuan reassign di halaman Teknisi.
-- Tests: 5 unit/integration test baru di `tests/unit/admin-advanced.test.ts`.
+- Migration 0012: membuat tabel `facility_manager_notes` dan indeks terkait.
+- Worker: endpoint `/api/reports/stats` (statistik), `/api/reports/summary` (laporan ringkas), `/api/reports/summary.csv` (ekspor CSV), dan `/api/reports/:id/follow-up` (catatan tindak lanjut).
+- Frontend: Tab navigasi Statistik & Laporan untuk Manajer Fasilitas, kartu ringkasan total masalah selesai, chart CSS diagram kategori, form filter pencarian, tombol ekspor CSV, dan dialog modal pengisian catatan tindak lanjut.
+- Tests: 5 unit/integration test baru di `tests/unit/facility-manager.test.ts`.
 
 ## Test
 - [x] Test dijalankan (107/107 passed)
