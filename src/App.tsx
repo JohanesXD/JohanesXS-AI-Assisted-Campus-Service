@@ -1353,147 +1353,163 @@ export default function App() {
       {/* Render panel berdasarkan Role */}
       {user.role === "REPORTER" && (
         <main className="workspace-container">
-          <h1>Buat Laporan Baru</h1>
-          <p style={{ marginBottom: 32 }}>Laporkan masalah fasilitas kampus secara langsung.</p>
+          <h1>📋 Buat Laporan Baru</h1>
+          <p style={{ marginBottom: 0, color: "var(--text)" }}>Laporkan masalah fasilitas kampus secara langsung.</p>
 
           {message && (
-            <div className={message.startsWith("Laporan berhasil") ? "alert-success" : "alert-error"}>
+            <div style={{ marginTop: 16 }} className={message.startsWith("Laporan berhasil") ? "alert-success" : "alert-error"}>
               {message}
             </div>
           )}
 
           <div className="flex-container">
+            {/* Form Section */}
             <div className="flex-main">
               <form onSubmit={submitRequest} style={{ background: "var(--social-bg)", padding: 32, borderRadius: 12, border: "1px solid var(--border)" }}>
-                <div className="form-group">
-                  <label>Judul Masalah</label>
-                  <input 
-                    type="text"
-                    value={title} 
-                    onChange={(e) => setTitle(e.target.value)} 
-                    placeholder="misal: AC Kelas B301 tidak dingin"
-                    className="form-input"
-                  />
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+                  {/* Left Column */}
+                  <div>
+                    <div className="form-group">
+                      <label>Judul Masalah</label>
+                      <input 
+                        type="text"
+                        value={title} 
+                        onChange={(e) => setTitle(e.target.value)} 
+                        placeholder="misal: AC Kelas B301 tidak dingin"
+                        className="form-input"
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label>Deskripsi Detail</label>
+                      <textarea
+                        value={description}
+                        onChange={(e) => setDescription(e.target.value)}
+                        placeholder="Jelaskan secara spesifik agar teknisi mudah mengidentifikasi (minimal 20 karakter)..."
+                        rows={4}
+                        className="form-textarea"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Right Column */}
+                  <div>
+                    <div className="form-group">
+                      <label>Gedung</label>
+                      <select
+                        value={selectedBuilding}
+                        onChange={(e) => handleBuildingChange(e.target.value)}
+                        className="form-select"
+                      >
+                        {buildingsList.map(b => (
+                          <option key={b} value={b}>{b}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="form-group" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                      <div>
+                        <label>Lantai</label>
+                        <select
+                          value={selectedFloor}
+                          onChange={(e) => handleFloorChange(e.target.value)}
+                          className="form-select"
+                        >
+                          {floorsList.map(f => (
+                            <option key={f} value={f}>{f}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label>Ruangan</label>
+                        <select
+                          value={selectedRoomId}
+                          onChange={(e) => setSelectedRoomId(e.target.value)}
+                          className="form-select"
+                        >
+                          {filteredRooms.map(r => (
+                            <option key={r.id} value={r.id}>{r.room_name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="form-group" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                      <div>
+                        <label>Kategori Masalah</label>
+                        <select 
+                          value={selectedCategoryId} 
+                          onChange={(e) => setSelectedCategoryId(e.target.value)}
+                          className="form-select"
+                        >
+                          {categoriesList.map(c => (
+                            <option key={c.id} value={c.id}>{c.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label>Tingkat Urgensi</label>
+                        <select
+                          value={urgency}
+                          onChange={(e) => setUrgency(e.target.value)}
+                          className="form-select"
+                        >
+                          <option value="LOW">Low</option>
+                          <option value="MEDIUM">Medium</option>
+                          <option value="HIGH">High</option>
+                          <option value="URGENT">Urgent</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="form-group">
-                  <label>Deskripsi Detail</label>
-                  <textarea
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    placeholder="Jelaskan secara spesifik agar teknisi mudah mengidentifikasi (minimal 20 karakter)..."
-                    rows={4}
-                    className="form-textarea"
-                  />
+                <div style={{ marginTop: 8, display: "flex", justifyContent: "flex-end" }}>
+                  <button type="submit" className="btn-primary" style={{ width: "auto", paddingInline: 40 }}>Kirim Laporan</button>
                 </div>
-
-                {/* Dropdown Lokasi Bertingkat */}
-                <div className="form-group" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
-                  <div>
-                    <label>Gedung</label>
-                    <select
-                      value={selectedBuilding}
-                      onChange={(e) => handleBuildingChange(e.target.value)}
-                      className="form-select"
-                    >
-                      {buildingsList.map(b => (
-                        <option key={b} value={b}>{b}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label>Lantai</label>
-                    <select
-                      value={selectedFloor}
-                      onChange={(e) => handleFloorChange(e.target.value)}
-                      className="form-select"
-                    >
-                      {floorsList.map(f => (
-                        <option key={f} value={f}>{f}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label>Ruangan</label>
-                    <select
-                      value={selectedRoomId}
-                      onChange={(e) => setSelectedRoomId(e.target.value)}
-                      className="form-select"
-                    >
-                      {filteredRooms.map(r => (
-                        <option key={r.id} value={r.id}>{r.room_name}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="form-group" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-                  <div>
-                    <label>Kategori Masalah</label>
-                    <select 
-                      value={selectedCategoryId} 
-                      onChange={(e) => setSelectedCategoryId(e.target.value)}
-                      className="form-select"
-                    >
-                      {categoriesList.map(c => (
-                        <option key={c.id} value={c.id}>{c.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label>Tingkat Urgensi</label>
-                    <select
-                      value={urgency}
-                      onChange={(e) => setUrgency(e.target.value)}
-                      className="form-select"
-                    >
-                      <option value="LOW">Low</option>
-                      <option value="MEDIUM">Medium</option>
-                      <option value="HIGH">High</option>
-                      <option value="URGENT">Urgent</option>
-                    </select>
-                  </div>
-                </div>
-
-                <button type="submit" className="btn-primary" style={{ width: "auto", paddingInline: 32 }}>Kirim Laporan</button>
               </form>
             </div>
 
+            {/* Reports List Section */}
             <div className="flex-side">
-              <h2>Laporan Saya</h2>
+              <h2>📑 Laporan Saya</h2>
               {requests.length === 0 ? (
-                <p style={{ color: "var(--text)", marginTop: 16 }}>Belum ada laporan yang Anda buat.</p>
+                <div style={{ padding: 40, textAlign: "center", border: "2px dashed var(--border)", borderRadius: 12, marginTop: 16, color: "var(--text)" }}>
+                  <p style={{ fontSize: 15 }}>Belum ada laporan yang Anda buat.</p>
+                </div>
               ) : (
-                <table className="premium-table">
-                  <thead>
-                    <tr>
-                      <th>Nomor</th>
-                      <th>Judul</th>
-                      <th>Lokasi</th>
-                      <th>Kategori</th>
-                      <th>Urgensi</th>
-                      <th>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {requests.map((item) => (
-                      <tr key={item.id} style={{ cursor: "pointer" }} onClick={() => handleSelectRequest(item)}>
-                        <td><code>{item.request_number}</code></td>
-                        <td>{item.title}</td>
-                        <td style={{ fontSize: 13 }}>{item.location}</td>
-                        <td>{item.category}</td>
-                        <td>
-                          <span style={{ fontSize: 12, fontWeight: 600 }}>{item.urgency}</span>
-                        </td>
-                        <td>
-                          <span className={`status-indicator ${item.status.toLowerCase() === 'submitted' ? 'submitted' : 'progress'}`}>
-                            {item.status}
-                          </span>
-                        </td>
+                <div style={{ overflowX: "auto", borderRadius: 12 }}>
+                  <table className="premium-table">
+                    <thead>
+                      <tr>
+                        <th>Nomor</th>
+                        <th>Judul</th>
+                        <th>Lokasi</th>
+                        <th>Kategori</th>
+                        <th>Urgensi</th>
+                        <th>Status</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {requests.map((item) => (
+                        <tr key={item.id} style={{ cursor: "pointer" }} onClick={() => handleSelectRequest(item)}>
+                          <td><code style={{ fontSize: 12 }}>{item.request_number}</code></td>
+                          <td style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis" }}>{item.title}</td>
+                          <td>{item.location}</td>
+                          <td>{item.category}</td>
+                          <td>
+                            <span style={{ fontSize: 12, fontWeight: 600 }}>{item.urgency}</span>
+                          </td>
+                          <td>
+                            <span className={`status-indicator ${item.status.toLowerCase() === 'submitted' ? 'submitted' : 'progress'}`}>
+                              {item.status}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
 
               {/* Detail Laporan Pelapor */}
