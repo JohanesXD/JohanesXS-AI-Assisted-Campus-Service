@@ -25,6 +25,10 @@ type ServiceRequest = {
   urgency: string;
 
   rejection_reason?: string;
+  resolution_rejected_reason?: string;
+  resolved_at?: string;
+  confirmation_due_at?: string;
+  closed_at?: string;
   created_at?: string;
   updated_at?: string;
 };
@@ -136,6 +140,9 @@ export default function App() {
   const [comments, setComments] = useState<CommentItem[]>([]);
   const [newComment, setNewComment] = useState("");
   const [detailMessage, setDetailMessage] = useState("");
+  const [rejectResolutionReason, setRejectResolutionReason] = useState("");
+  const [closureMessage, setClosureMessage] = useState("");
+  const [confirmLoading, setConfirmLoading] = useState(false);
   // Admin Action States
 
   const [selectedRequest, setSelectedRequest] = useState<ServiceRequest | null>(null);
@@ -555,6 +562,114 @@ export default function App() {
       await loadComments(requestId);
     } catch (e) {
       setDetailMessage("Koneksi terputus. Gagal mengirim komentar.");
+    }
+  }
+
+  async function handleConfirmResolution(requestId: string) {
+    if (!user) return;
+    setConfirmLoading(true);
+    setClosureMessage("");
+    try {
+      const response = await fetch(`/api/requests/${requestId}/confirm-resolution`, {
+        method: "POST",
+        headers: { "X-User-Email": user.campus_email, "X-User-Role": user.role }
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        setClosureMessage(result.error ?? "Gagal mengonfirmasi.");
+        setConfirmLoading(false);
+        return;
+      }
+      setClosureMessage("Laporan berhasil dikonfirmasi.");
+      setConfirmLoading(false);
+      await Promise.all([
+        loadRequestDetail(requestId),
+        loadRequests()
+      ]);
+    } catch (e) {
+      setClosureMessage("Koneksi terputus.");
+      setConfirmLoading(false);
+    }
+  }
+
+  async function handleRejectResolution(requestId: string) {
+    if (!user) return;
+    if (!rejectResolutionReason.trim() || rejectResolutionReason.trim().length < 5) {
+      setClosureMessage("Alasan penolakan wajib diisi (minimal 5 karakter).");
+      return;
+    }
+    setConfirmLoading(true);
+    setClosureMessage("");
+    try {
+      const response = await fetch(`/api/requests/${requestId}/reject-resolution`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-User-Email": user.campus_email,
+          "X-User-Role": user.role
+        },
+        body: JSON.stringify({ reason: rejectResolutionReason })
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        setClosureMessage(result.error ?? "Gagal menolak hasil.");
+        setConfirmLoading(false);
+        return;
+      }
+      setRejectResolutionReason("");
+      setClosureMessage("Penolakan hasil berhasil dikirim.");
+      setConfirmLoading(false);
+      await Promise.all([
+        loadRequestDetail(requestId),
+        loadRequests()
+      ]);
+    } catch (e) {
+      setClosureMessage("Koneksi terputus.");
+      setConfirmLoading(false);
+    }
+  }
+
+  async function handleAdminClose(requestId: string) {
+    if (!user) return;
+    setAdminError("");
+    setAdminSuccess("");
+    try {
+      const response = await fetch(`/api/requests/${requestId}/close`, {
+        method: "POST",
+        headers: { "X-User-Email": user.campus_email, "X-User-Role": user.role }
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        setAdminError(result.error ?? "Gagal menutup laporan.");
+        return;
+      }
+      setAdminSuccess("Laporan berhasil ditutup.");
+      setSelectedRequest(null);
+      await loadRequests();
+    } catch (e) {
+      setAdminError("Koneksi terputus.");
+    }
+  }
+
+  async function handleAdminReopen(requestId: string) {
+    if (!user) return;
+    setAdminError("");
+    setAdminSuccess("");
+    try {
+      const response = await fetch(`/api/requests/${requestId}/reopen`, {
+        method: "POST",
+        headers: { "X-User-Email": user.campus_email, "X-User-Role": user.role }
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        setAdminError(result.error ?? "Gagal membuka ulang laporan.");
+        return;
+      }
+      setAdminSuccess("Laporan berhasil dibuka ulang.");
+      setSelectedRequest(null);
+      await loadRequests();
+    } catch (e) {
+      setAdminError("Koneksi terputus.");
     }
   }
 
@@ -1261,8 +1376,48 @@ export default function App() {
                       </div>
                     </div>
 
+                    {selectedRequestDetail.status === "WAITING_REPORTER_CONFIRMATION" && (
+                      <div style={{ marginBottom: 24 }}>
+                        <h4 style={{ margin: "0 0 12px", color: "var(--text-h)", fontSize: 16 }}>Konfirmasi Hasil Pekerjaan</h4>
+                        {closureMessage && (
+                          <div className={closureMessage.startsWith("Laporan berhasil") || closureMessage.startsWith("Penolakan") ? "alert-success" : "alert-error"} style={{ marginBottom: 12 }}>
+                            {closureMessage}
+                          </div>
+                        )}
+                        <div style={{ marginBottom: 12, fontSize: 13, color: "var(--text)" }}>
+                          Batas konfirmasi: {selectedRequestDetail.confirmation_due_at ?? "Tidak tersedia"}
+                        </div>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          <button
+                            onClick={() => handleConfirmResolution(selectedRequestDetail.id)}
+                            className="btn-primary"
+                            disabled={confirmLoading}
+                            style={{ width: "auto", paddingInline: 20 }}
+                          >
+                            {confirmLoading ? "Memproses..." : "Konfirmasi Selesai"}
+                          </button>
+                          <textarea
+                            value={rejectResolutionReason}
+                            onChange={(e) => setRejectResolutionReason(e.target.value)}
+                            placeholder="Alasan penolakan (minimal 5 karakter)..."
+                            rows={2}
+                            className="form-textarea"
+                            style={{ width: "100%", fontSize: 14, marginTop: 8 }}
+                          />
+                          <button
+                            onClick={() => handleRejectResolution(selectedRequestDetail.id)}
+                            className="btn-logout"
+                            disabled={confirmLoading}
+                            style={{ borderColor: "#ef4444", color: "#ef4444", fontWeight: 600, width: "auto", paddingInline: 20 }}
+                          >
+                            {confirmLoading ? "Memproses..." : "Tolak Hasil"}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
                     <button
-                      onClick={() => { setSelectedRequestDetail(null); setStatusHistory([]); setComments([]); setNewComment(""); setDetailMessage(""); }}
+                      onClick={() => { setSelectedRequestDetail(null); setStatusHistory([]); setComments([]); setNewComment(""); setDetailMessage(""); setRejectResolutionReason(""); setClosureMessage(""); }}
                       className="btn-logout"
                       style={{ width: "100%" }}
                     >
@@ -1520,6 +1675,27 @@ export default function App() {
 
                         </button>
 
+                      </div>
+
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
+                        <button
+
+                          onClick={() => handleAdminClose(selectedRequest.id)}
+                          className="btn-logout"
+                          style={{ fontWeight: 600 }}
+                        >
+                          Tutup Laporan
+                        </button>
+                        {selectedRequest.status === "REOPEN_REQUESTED" && (
+                          <button
+
+                            onClick={() => handleAdminReopen(selectedRequest.id)}
+                            className="btn-primary"
+                            style={{ width: "auto", paddingInline: 20 }}
+                          >
+                            Buka Ulang Laporan
+                          </button>
+                        )}
                       </div>
 
                     </div>
