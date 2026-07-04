@@ -91,4 +91,4 @@ Keseluruhan kode proyek dinilai memiliki kualitas penulisan yang premium, arsite
 
 ## Reviewer
 * **Nama:** JohanesXD
-* **Keputusan:** **APPROVED (SIAP MERGE)**
+* **Keputusan:** **Approved**
