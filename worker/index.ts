@@ -107,6 +107,14 @@ export default {
       return json({ data: result.results });
     }
 
+    // Endpoint GET /api/technicians
+    if (url.pathname === "/api/technicians" && request.method === "GET") {
+      const result = await env.DB.prepare(`
+        SELECT id, name, campus_email FROM users WHERE role = 'TECHNICIAN' AND is_active = 1 ORDER BY name ASC
+      `).all();
+      return json({ data: result.results });
+    }
+
     // Endpoint POST /api/requests/:id/reject
     const rejectMatch = url.pathname.match(/^\/api\/requests\/([a-zA-Z0-9-]+)\/reject$/);
     if (rejectMatch && request.method === "POST") {
@@ -139,6 +147,61 @@ export default {
       return json({ success: true, status: "REJECTED" }, 200);
     }
 
+    // Endpoint POST /api/requests/:id/assign
+    const assignMatch = url.pathname.match(/^\/api\/requests\/([a-zA-Z0-9-]+)\/assign$/);
+    if (assignMatch && request.method === "POST") {
+      if (currentUser.role !== "ADMIN") {
+        return json({ error: "Hanya administrator (ADMIN) yang dapat menugaskan laporan." }, 403);
+      }
+
+      const requestId = assignMatch[1];
+      const input = await request.json() as { technician_id?: string };
+
+      if (!input.technician_id) {
+        return json({ error: "Teknisi wajib dipilih." }, 422);
+      }
+
+      // Verifikasi keberadaan teknisi aktif
+      const techExists = await env.DB.prepare(`
+        SELECT id FROM users WHERE id = ? AND role = 'TECHNICIAN' AND is_active = 1
+      `).bind(input.technician_id).first();
+
+      if (!techExists) {
+        return json({ error: "Teknisi tidak valid atau tidak aktif." }, 422);
+      }
+
+      // Verifikasi laporan
+      const checkRequest = await env.DB.prepare(`
+        SELECT id FROM service_requests WHERE id = ?
+      `).bind(requestId).first();
+
+      if (!checkRequest) {
+        return json({ error: "Laporan tidak ditemukan." }, 404);
+      }
+
+      // Buat penugasan baru
+      const assignmentId = `asg-${crypto.randomUUID()}`;
+      
+      // Update status penugasan lama (jika ada) ke REPLACED
+      await env.DB.prepare(`
+        UPDATE request_assignments SET status = 'REPLACED', updated_at = CURRENT_TIMESTAMP
+        WHERE request_id = ? AND status = 'ACTIVE'
+      `).bind(requestId).run();
+
+      // Insert penugasan baru
+      await env.DB.prepare(`
+        INSERT INTO request_assignments (id, request_id, technician_id, assignment_type, status, assigned_by_user_id)
+        VALUES (?, ?, ?, 'PRIMARY', 'ACTIVE', ?)
+      `).bind(assignmentId, requestId, input.technician_id, currentUser.id).run();
+
+      // Update status laporan menjadi ASSIGNED
+      await env.DB.prepare(`
+        UPDATE service_requests SET status = 'ASSIGNED', updated_at = CURRENT_TIMESTAMP WHERE id = ?
+      `).bind(requestId).run();
+
+      return json({ success: true, status: "ASSIGNED" }, 200);
+    }
+
     // Endpoint /api/requests
     if (url.pathname.startsWith("/api/requests")) {
       
@@ -147,16 +210,25 @@ export default {
         let query = `
           SELECT sr.id, sr.request_number, sr.title, sr.description, sr.status, sr.urgency, sr.rejection_reason, sr.created_at,
                  c.name AS category,
-                 r.building || ' - ' || r.floor || ' - ' || r.room_name AS location
+                 r.building || ' - ' || r.floor || ' - ' || r.room_name AS location,
+                 u_tech.name AS technician_name
           FROM service_requests sr
           JOIN categories c ON sr.category_id = c.id
           JOIN rooms r ON sr.room_id = r.id
+          LEFT JOIN request_assignments ra ON sr.id = ra.request_id AND ra.status = 'ACTIVE'
+          LEFT JOIN users u_tech ON ra.technician_id = u_tech.id
         `;
         let params: string[] = [];
 
         // Jika Reporter, filter hanya laporan miliknya sendiri
         if (currentUser.role === "REPORTER") {
           query += " WHERE sr.reporter_id = ?";
+          params.push(currentUser.id);
+        }
+
+        // Jika Teknisi, filter hanya tugas yang diberikan kepadanya
+        if (currentUser.role === "TECHNICIAN") {
+          query += " WHERE ra.technician_id = ? AND ra.status = 'ACTIVE'";
           params.push(currentUser.id);
         }
 
