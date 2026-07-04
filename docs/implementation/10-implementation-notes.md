@@ -1,90 +1,82 @@
-# Implementation Notes — FR-11: Perubahan dan Pembatalan Laporan oleh Pelapor
+# Implementation Notes — FR-12: Advanced Admin Actions & FR-13: Facility Manager Dashboard
 
 ## Issue
-- GitHub Issue: #34
-- Requirements: FR-031, FR-032, FR-033, FR-034
-- User Story: US-015
-- Acceptance Criteria: AC-022, AC-023
+- GitHub Issue: #12, #13
+- Requirements: FR-038, FR-039, FR-040, FR-024, FR-025, FR-026, FR-027, FR-028, FR-029, FR-042, FR-043
+- User Story: US-017, US-012, US-013, US-020
+- Acceptance Criteria: AC-024, AC-025, AC-026, AC-027
 
 ## Ringkasan Perubahan
-Implementasi fitur yang mengizinkan pelapor untuk mengubah atau membatalkan laporan yang sudah dikirim, dengan alasan perubahan/pembatalan yang tercatat di sistem.
+Implementasi menyeluruh untuk fitur administrasi lanjutan (Issue 12) dan dashboard analitis manajer fasilitas (Issue 13). Ini mencakup pengelolaan detail laporan, merge laporan duplikat, reassign teknisi dengan persetujuan ganda, visualisasi statistik masalah selesai, diagram batang kategori, filter laporan ringkas, ekspor laporan ke file CSV, dan pengisian catatan tindak lanjut evaluator.
 
 ## Backend Changes
 
-### 1. Database Migration (`database/migrations/0010_request_edits.sql`)
-- Tabel `request_edits` untuk menyimpan riwayat perubahan laporan
-- Kolom: id, request_id, edited_by_user_id, old/new title, description, category_id, room_id, urgency, reason, created_at
-- Index pada request_id dan created_at
+### 1. Database Migration (`database/migrations/0012_admin_management.sql`)
+- Menambahkan kolom `duplicate_of_id` (TEXT) ke tabel `service_requests` untuk referensi laporan utama.
+- Membuat tabel `facility_manager_notes` untuk mencatat catatan evaluasi tindak lanjut beserta alasannya.
 
 ### 2. API Endpoints (`worker/index.ts`)
 
-#### PATCH /api/requests/:id — Edit Laporan (FR-031, AC-023)
-- **Auth**: Hanya REPORTER
-- **Validasi**: 
-  - Laporan harus milik pelapor (reporter_id === currentUser.id)
-  - Status harus SUBMITTED, UNDER_REVIEW, atau REJECTED
-  - Alasan perubahan wajib diisi (minimal 5 karakter)
-  - Judul tidak boleh kosong, deskripsi minimal 20 karakter
-- **Proses**:
-  - Update field yang diubah (title, description, category_id, room_id, urgency)
-  - Reset status ke UNDER_REVIEW
-  - Hapus rejection_reason jika sebelumnya REJECTED
-  - Simpan riwayat perubahan ke tabel `request_edits`
-  - Catat perubahan status di `request_status_history`
-  - Kirim notifikasi "EDITED" ke semua admin
+#### PATCH /api/admin/requests/:id/edit — Admin Edit Laporan (FR-038)
+- Memperbarui detail laporan sebelum penugasan dengan menyertakan catatan alasan wajib.
 
-#### POST /api/requests/:id/cancel — Batalkan Laporan (FR-034, AC-022)
-- **Auth**: Hanya REPORTER
-- **Validasi**:
-  - Laporan harus milik pelapor
-  - Status harus SUBMITTED, UNDER_REVIEW, atau REJECTED
-  - Alasan pembatalan wajib diisi (minimal 5 karakter)
-- **Proses**:
-  - Update status ke CANCELLED
-  - Catat perubahan status di `request_status_history` dengan alasan
-  - Kirim notifikasi "CANCELLED" ke semua admin
+#### POST /api/admin/requests/:id/merge — Gabungkan Duplikat (FR-039, AC-024)
+- Menandai laporan duplikat sebagai `MERGED` dan menautkannya ke laporan utama.
 
-#### Notifikasi
-- Ditambahkan case "EDITED" di `notifyStatusChange` untuk mengirim notifikasi ke admin saat pelapor mengubah laporan
+#### POST /api/admin/requests/:id/reassign — Reassign Teknisi (FR-040, AC-025)
+- Pengajuan penggantian teknisi aktif ke status `REPLACEMENT_PENDING`.
+
+#### POST /api/requests/:id/reassign/approve — Persetujuan Teknisi (FR-040, AC-025)
+- Persetujuan ganda (*dual-approval*) teknisi lama dan baru untuk mengaktifkan assignment baru.
+
+#### GET /api/reports/stats — Statistik Dashboard (FR-024, FR-025, FR-026)
+- **Auth**: Hanya FACILITY_MANAGER
+- Mengembalikan total laporan berstatus selesai dan distribusi kategori laporan.
+
+#### GET /api/reports/summary — Laporan Ringkas (FR-028, FR-029)
+- **Auth**: Hanya FACILITY_MANAGER
+- Mengembalikan daftar laporan terfilter berdasarkan ruangan, kategori, rentang tanggal, dan diurutkan.
+
+#### GET /api/reports/summary.csv — Ekspor Laporan CSV (FR-042, AC-026)
+- **Auth**: Hanya FACILITY_MANAGER
+- Menghasilkan file teks format CSV yang kompatibel dengan parameter filter aktif.
+
+#### POST /api/reports/:id/follow-up — Catatan Tindak Lanjut (FR-043, AC-027)
+- **Auth**: Hanya FACILITY_MANAGER
+- Validasi alasan perubahan wajib (minimal 5 karakter) dan menyimpan catatan tindak lanjut evaluator.
 
 ## Frontend Changes (`src/App.tsx`)
 
 ### State Baru
-- `isEditing`, `editTitle`, `editDescription`, `editCategoryId`, `editBuilding`, `editFloor`, `editRoomId`, `editUrgency`, `editReason`, `editError`, `editSuccess`
-- `showCancelModal`, `cancelReason`, `cancelError`, `cancelSuccess`
+- `fmStats`, `fmSummary`, `fmFilterCategory`, `fmFilterRoom`, `fmFilterStartDate`, `fmFilterEndDate`, `fmSort`
+- `selectedFmReport`, `fmNoteInput`, `fmNoteReasonInput`
 
 ### Fungsi Baru
-- `handleStartEdit()` — Mengisi form edit dari data laporan yang dipilih
-- `handleEditSubmit(requestId)` — Mengirim PATCH ke API
-- `handleCancelSubmit(requestId)` — Mengirim POST cancel ke API
-- `resetEditState()` — Reset semua state edit
-- `resetCancelState()` — Reset semua state cancel
+- `loadFmStats()`, `loadFmSummary()` — Memuat statistik dan laporan ringkas.
+- `handleAddFmFollowUp(e)` — Menyimpan catatan tindak lanjut ke backend.
 
 ### UI Baru
-- Tombol "✎ Edit Laporan" dan "✕ Batalkan Laporan" muncul hanya untuk status SUBMITTED, UNDER_REVIEW, REJECTED
-- Form edit dengan field: judul, deskripsi, lokasi bertingkat (gedung/lantai/ruangan), kategori, urgensi, alasan perubahan
-- Modal konfirmasi pembatalan dengan input alasan
+- Pilihan navigasi atas khusus Manajer Fasilitas: "Statistik & Laporan" vs "Kelola Ruangan".
+- Kartu ringkasan total masalah diselesaikan dan CSS progress bar diagram kategori terpopuler.
+- Form filter komparatif (ruangan, kategori, tanggal mulai/akhir, pengurutan).
+- Tabel laporan ringkas beserta tombol ekspor **CSV** dan dialog modal **Catatan Tindak Lanjut**.
 
-## Test (`tests/unit/reporter-edit-cancel.test.ts`)
-- 11 test case untuk validasi edit
-- 9 test case untuk validasi cancel
-- 2 test case untuk transisi status
+## Test (`tests/unit/facility-manager.test.ts`)
+- Pengujian stats dashboard (total solved, category count).
+- Pengujian filter pencarian laporan ringkas.
+- Pengujian unduhan ekspor format CSV.
+- Pengujian validasi alasan catatan tindak lanjut.
 
 ## Acceptance Criteria Coverage
 
 | AC | Status | Keterangan |
 |----|--------|------------|
-| AC-022 | ✅ | Pelapor dapat membatalkan laporan berstatus awal dengan alasan |
-| AC-023 | ✅ | Pelapor dapat mengubah laporan, sistem mencatat alasan, mengembalikan status ke UNDER_REVIEW, dan mengirim notifikasi ke admin |
+| AC-026 | ✅ | Filter dashboard analitis dan ekspor data ke file CSV. |
+| AC-027 | ✅ | Penambahan catatan tindak lanjut dengan alasan wajib minimal 5 karakter. |
 
 ## Checklist Pekerjaan
-- [x] Buat form edit laporan dan tombol batalkan laporan bagi Pelapor
-- [x] Buat API edit (PATCH /api/requests/:id) dan batalkan (POST /api/requests/:id/cancel)
-- [x] Simpan riwayat perubahan di database (request_edits dan status_history)
-- [x] Buat integration test untuk validasi alur pembatalan dan review admin setelah edit
-- [ ] Update traceability matrix (dilakukan di PR review)
-
-## Asumsi
-- ASUMSI: Pelapor hanya bisa edit/cancel laporan milik sendiri
-- ASUMSI: Edit mengembalikan status ke UNDER_REVIEW agar admin meninjau ulang
-- ASUMSI: Cancel langsung mengubah status ke CANCELLED tanpa perlu persetujuan admin
+- [x] Buat halaman Dashboard dan Laporan Ringkas untuk Manajer Fasilitas
+- [x] Buat tombol export CSV di frontend dan API endpoint `/api/reports/summary.csv`
+- [x] Buat API POST `/api/reports/:id/follow-up` untuk mencatat tindak lanjut Manajer
+- [x] Buat unit test untuk validasi data export CSV dan alasan wajib pada catatan tindak lanjut
+- [x] Update traceability matrix

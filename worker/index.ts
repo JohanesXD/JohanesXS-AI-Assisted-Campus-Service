@@ -382,13 +382,20 @@ export default {
                sr.rejection_reason, sr.resolution_rejected_reason,
                sr.resolved_at, sr.confirmation_due_at, sr.closed_at,
                sr.created_at, sr.updated_at,
-               c.name AS category,
+               c.name AS category, sr.category_id,
                u.name AS reporter_name, u.campus_email AS reporter_email,
-               r.building || ' - ' || r.floor || ' - ' || r.room_name AS location
+               r.building || ' - ' || r.floor || ' - ' || r.room_name AS location, sr.room_id,
+               u_tech.id AS technician_id, u_tech.name AS technician_name,
+               (SELECT ra2.id || ':' || ra2.technician_id || ':' || u_new.name || ':' || ra2.reason || ':' || COALESCE(ra2.old_technician_approved_at, '') || ':' || COALESCE(ra2.new_technician_approved_at, '')
+                FROM request_assignments ra2
+                JOIN users u_new ON ra2.technician_id = u_new.id
+                WHERE ra2.request_id = sr.id AND ra2.status = 'REPLACEMENT_PENDING' LIMIT 1) AS pending_reassignment
         FROM service_requests sr
         JOIN categories c ON sr.category_id = c.id
         JOIN rooms r ON sr.room_id = r.id
         JOIN users u ON sr.reporter_id = u.id
+        LEFT JOIN request_assignments ra ON sr.id = ra.request_id AND ra.status = 'ACTIVE' AND ra.assignment_type = 'PRIMARY'
+        LEFT JOIN users u_tech ON ra.technician_id = u_tech.id
         WHERE sr.id = ?
       `).bind(requestId).first();
 
@@ -918,6 +925,224 @@ export default {
       return json({ success: true, status: "REOPENED" }, 200);
     }
 
+    // POST /api/requests/:id/assign - Admin menugaskan teknisi utama (FR-010)
+    const adminAssignMatch = url.pathname.match(/^\/api\/requests\/([a-zA-Z0-9-]+)\/assign$/);
+    if (adminAssignMatch && request.method === "POST") {
+      if (currentUser.role !== "ADMIN") {
+        return json({ error: "Hanya administrator (ADMIN) yang dapat menugaskan laporan." }, 403);
+      }
+
+      const requestId = adminAssignMatch[1];
+      const input = await request.json() as { technician_id?: string };
+
+      if (!input.technician_id) {
+        return json({ error: "Teknisi wajib dipilih." }, 422);
+      }
+
+      // Pastikan laporan ada
+      const checkRequest = await env.DB.prepare(`
+        SELECT id, status FROM service_requests WHERE id = ?
+      `).bind(requestId).first<{ id: string; status: string }>();
+
+      if (!checkRequest) {
+        return json({ error: "Laporan tidak ditemukan." }, 404);
+      }
+
+      // Validasi: hanya boleh menugaskan jika status SUBMITTED, UNDER_REVIEW, atau REJECTED
+      const assignableStatuses = ["SUBMITTED", "UNDER_REVIEW", "REJECTED"];
+      if (!assignableStatuses.includes(checkRequest.status)) {
+        return json({ error: "Laporan tidak dapat ditugaskan pada status saat ini." }, 422);
+      }
+
+      // Pastikan teknisi ada dan role TECHNICIAN
+      const checkTechnician = await env.DB.prepare(`
+        SELECT id, role FROM users WHERE id = ? AND role = 'TECHNICIAN' AND is_active = 1
+      `).bind(input.technician_id).first<{ id: string; role: string }>();
+
+      if (!checkTechnician) {
+        return json({ error: "Teknisi tidak valid atau tidak aktif." }, 422);
+      }
+
+      // Hapus assignment aktif sebelumnya jika ada
+      await env.DB.prepare(`
+        UPDATE request_assignments SET status = 'REPLACED', updated_at = CURRENT_TIMESTAMP
+        WHERE request_id = ? AND status = 'ACTIVE' AND assignment_type = 'PRIMARY'
+      `).bind(requestId).run();
+
+      // Buat assignment utama
+      const assignmentId = `asgn-${crypto.randomUUID()}`;
+      await env.DB.prepare(`
+        INSERT INTO request_assignments
+        (id, request_id, technician_id, assignment_type, status, assigned_by_user_id, reason, created_at, updated_at)
+        VALUES (?, ?, ?, 'PRIMARY', 'ACTIVE', ?, null, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      `).bind(
+        assignmentId,
+        requestId,
+        input.technician_id,
+        currentUser.id
+      ).run();
+
+      // Update status laporan ke ASSIGNED
+      await env.DB.prepare(`
+        UPDATE service_requests SET status = 'ASSIGNED', updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).bind(requestId).run();
+
+      // Catat riwayat status
+      await recordStatusHistory(env, requestId, checkRequest.status, "ASSIGNED", currentUser.id, null);
+
+      // Kirim notifikasi ke teknisi
+      await notifyStatusChange(env, requestId, "ASSIGNED", currentUser.id);
+
+      return json({ success: true, assignmentId }, 201);
+    }
+
+    // ========== FR-040: Teknisi Approve Reassignment ==========
+    const techApproveMatch = url.pathname.match(/^\/api\/requests\/([a-zA-Z0-9-]+)\/reassign\/approve$/);
+    if (techApproveMatch && request.method === "POST") {
+      if (currentUser.role !== "TECHNICIAN") {
+        return json({ error: "Hanya teknisi yang dapat menyetujui penggantian tugas." }, 403);
+      }
+
+      const requestId = techApproveMatch[1];
+      const input = await request.json() as { approve?: boolean };
+
+      if (input.approve === undefined) {
+        return json({ error: "Status persetujuan (approve) wajib diisi." }, 422);
+      }
+
+      // Ambil assignment berstatus REPLACEMENT_PENDING
+      const pendingAssignment = await env.DB.prepare(`
+        SELECT id, technician_id, reason, assigned_by_user_id, old_technician_approved_at, new_technician_approved_at
+        FROM request_assignments
+        WHERE request_id = ? AND status = 'REPLACEMENT_PENDING' AND assignment_type = 'PRIMARY'
+      `).bind(requestId).first<{
+        id: string;
+        technician_id: string;
+        reason: string;
+        assigned_by_user_id: string;
+        old_technician_approved_at: string | null;
+        new_technician_approved_at: string | null;
+      }>();
+
+      if (!pendingAssignment) {
+        return json({ error: "Tidak ada pengajuan penggantian teknisi yang aktif." }, 422);
+      }
+
+      // Ambil assignment yang sedang ACTIVE
+      const activeAssignment = await env.DB.prepare(`
+        SELECT id, technician_id FROM request_assignments
+        WHERE request_id = ? AND status = 'ACTIVE' AND assignment_type = 'PRIMARY'
+      `).bind(requestId).first<{ id: string; technician_id: string }>();
+
+      if (!activeAssignment) {
+        return json({ error: "Tidak ada teknisi utama aktif saat ini." }, 422);
+      }
+
+      const isOldTech = currentUser.id === activeAssignment.technician_id;
+      const isNewTech = currentUser.id === pendingAssignment.technician_id;
+
+      if (!isOldTech && !isNewTech) {
+        return json({ error: "Anda tidak berhak memberikan persetujuan pada penggantian tugas ini." }, 403);
+      }
+
+      if (!input.approve) {
+        // Jika menolak, status menjadi DECLINED
+        await env.DB.prepare(`
+          UPDATE request_assignments
+          SET status = 'DECLINED', updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `).bind(pendingAssignment.id).run();
+
+        // Kirim notifikasi ke admin
+        await createNotification(
+          env,
+          pendingAssignment.assigned_by_user_id,
+          "STATUS_CHANGE",
+          "Penggantian Teknisi Ditolak",
+          `Teknisi menolak pengajuan penggantian tugas untuk laporan ini.`,
+          requestId
+        );
+
+        return json({ success: true, status: "DECLINED", message: "Penggantian tugas ditolak." });
+      }
+
+      // Jika menyetujui, update timestamp persetujuan
+      let oldApproved = pendingAssignment.old_technician_approved_at;
+      let newApproved = pendingAssignment.new_technician_approved_at;
+
+      if (isOldTech) {
+        oldApproved = new Date().toISOString();
+        await env.DB.prepare(`
+          UPDATE request_assignments
+          SET old_technician_approved_at = ?, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `).bind(oldApproved, pendingAssignment.id).run();
+      }
+
+      if (isNewTech) {
+        newApproved = new Date().toISOString();
+        await env.DB.prepare(`
+          UPDATE request_assignments
+          SET new_technician_approved_at = ?, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `).bind(newApproved, pendingAssignment.id).run();
+      }
+
+      // Jika KEDUANYA sudah menyetujui, aktifkan assignment baru
+      if (oldApproved && newApproved) {
+        // Ubah assignment lama menjadi REPLACED
+        await env.DB.prepare(`
+          UPDATE request_assignments
+          SET status = 'REPLACED', updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `).bind(activeAssignment.id).run();
+
+        // Ubah assignment baru menjadi ACTIVE
+        await env.DB.prepare(`
+          UPDATE request_assignments
+          SET status = 'ACTIVE', updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `).bind(pendingAssignment.id).run();
+
+        // Tambah riwayat status
+        await recordStatusHistory(
+          env,
+          requestId,
+          null,
+          "ASSIGNED",
+          pendingAssignment.assigned_by_user_id,
+          `Teknisi diganti dengan persetujuan bersama.`
+        );
+
+        // Notifikasi ke admin
+        await createNotification(
+          env,
+          pendingAssignment.assigned_by_user_id,
+          "STATUS_CHANGE",
+          "Penggantian Teknisi Berhasil",
+          `Teknisi lama dan baru telah menyetujui penggantian tugas. Teknisi baru kini aktif.`,
+          requestId
+        );
+
+        return json({
+          success: true,
+          status: "ACTIVE",
+          old_approved: true,
+          new_approved: true,
+          message: "Penggantian teknisi telah disetujui sepenuhnya dan aktif."
+        });
+      }
+
+      return json({
+        success: true,
+        status: "REPLACEMENT_PENDING",
+        old_approved: !!oldApproved,
+        new_approved: !!newApproved,
+        message: "Persetujuan Anda berhasil dicatat. Menunggu persetujuan dari teknisi lainnya."
+      });
+    }
+
     // Endpoint /api/requests
     if (url.pathname.startsWith("/api/requests")) {
       
@@ -942,10 +1167,10 @@ export default {
           params.push(currentUser.id);
         }
 
-        // Jika Teknisi, filter hanya tugas yang diberikan kepadanya
+        // Jika Teknisi, filter hanya tugas aktif atau pengajuan penggantian yang melibatkan dirinya
         if (currentUser.role === "TECHNICIAN") {
-          query += " WHERE ra.technician_id = ? AND ra.status = 'ACTIVE'";
-          params.push(currentUser.id);
+          query += " WHERE (ra.technician_id = ? AND ra.status = 'ACTIVE') OR EXISTS (SELECT 1 FROM request_assignments ra2 WHERE ra2.request_id = sr.id AND ra2.technician_id = ? AND ra2.status = 'REPLACEMENT_PENDING')";
+          params.push(currentUser.id, currentUser.id);
         }
 
         query += " ORDER BY sr.created_at DESC";
@@ -1303,6 +1528,462 @@ export default {
       }
 
       return json({ success: true, message: "Ruangan berhasil dinonaktifkan." });
+    }
+
+    // ========== FR-038: Admin Edit Laporan ==========
+    const adminEditMatch = url.pathname.match(/^\/api\/admin\/requests\/([a-zA-Z0-9-]+)\/edit$/);
+    if (adminEditMatch && request.method === "PATCH") {
+      if (currentUser.role !== "ADMIN") {
+        return json({ error: "Hanya administrator yang dapat mengubah laporan." }, 403);
+      }
+
+      const requestId = adminEditMatch[1];
+      const input = await request.json() as {
+        category_id?: string;
+        room_id?: string;
+        description?: string;
+        reason?: string;
+      };
+
+      if (!input.reason || input.reason.trim().length < 5) {
+        return json({ error: "Alasan perubahan wajib diisi (minimal 5 karakter)." }, 422);
+      }
+
+      const existingRequest = await env.DB.prepare(`
+        SELECT id, title, description, category_id, room_id, urgency, status FROM service_requests WHERE id = ?
+      `).bind(requestId).first<{ id: string; title: string; description: string; category_id: string; room_id: string; urgency: string; status: string }>();
+
+      if (!existingRequest) {
+        return json({ error: "Laporan tidak ditemukan." }, 404);
+      }
+
+      // Hanya boleh edit sebelum penugasan teknisi
+      const editableStatuses = ["SUBMITTED", "UNDER_REVIEW"];
+      if (!editableStatuses.includes(existingRequest.status)) {
+        return json({ error: "Laporan tidak dapat diubah setelah teknisi ditugaskan." }, 422);
+      }
+
+      const updates: Record<string, unknown> = {};
+      const editRecord: Record<string, unknown> = {
+        id: crypto.randomUUID(),
+        request_id: requestId,
+        edited_by_user_id: currentUser.id,
+        old_title: existingRequest.title,
+        new_title: existingRequest.title,
+        old_description: existingRequest.description,
+        new_description: existingRequest.description,
+        old_category_id: existingRequest.category_id,
+        new_category_id: existingRequest.category_id,
+        old_room_id: existingRequest.room_id,
+        new_room_id: existingRequest.room_id,
+        old_urgency: existingRequest.urgency,
+        new_urgency: existingRequest.urgency,
+        reason: input.reason.trim(),
+      };
+
+      if (input.description !== undefined) {
+        const trimmed = input.description.trim();
+        if (trimmed.length < 20) {
+          return json({ error: "Deskripsi minimal 20 karakter." }, 422);
+        }
+        updates.description = trimmed;
+        editRecord.new_description = trimmed;
+      }
+
+      if (input.category_id !== undefined) {
+        const categoryExists = await env.DB.prepare(`
+          SELECT id FROM categories WHERE id = ? AND is_active = 1
+        `).bind(input.category_id).first();
+        if (!categoryExists) {
+          return json({ error: "Kategori tidak valid." }, 422);
+        }
+        updates.category_id = input.category_id;
+        editRecord.new_category_id = input.category_id;
+      }
+
+      if (input.room_id !== undefined) {
+        const roomExists = await env.DB.prepare(`
+          SELECT id FROM rooms WHERE id = ? AND is_active = 1
+        `).bind(input.room_id).first();
+        if (!roomExists) {
+          return json({ error: "Ruangan tidak valid." }, 422);
+        }
+        updates.room_id = input.room_id;
+        editRecord.new_room_id = input.room_id;
+      }
+
+      if (Object.keys(updates).length === 0) {
+        return json({ error: "Tidak ada field yang diubah." }, 422);
+      }
+
+      await env.DB.prepare(`
+        UPDATE service_requests
+        SET description = COALESCE(?, description),
+            category_id = COALESCE(?, category_id),
+            room_id = COALESCE(?, room_id),
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).bind(
+        updates.description ?? null,
+        updates.category_id ?? null,
+        updates.room_id ?? null,
+        requestId
+      ).run();
+
+      // Simpan riwayat perubahan
+      await env.DB.prepare(`
+        INSERT INTO request_edits
+        (id, request_id, edited_by_user_id, old_title, new_title, old_description, new_description,
+         old_category_id, new_category_id, old_room_id, new_room_id, old_urgency, new_urgency, reason)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).bind(
+        editRecord.id,
+        editRecord.request_id,
+        editRecord.edited_by_user_id,
+        editRecord.old_title,
+        editRecord.new_title,
+        editRecord.old_description,
+        editRecord.new_description,
+        editRecord.old_category_id,
+        editRecord.new_category_id,
+        editRecord.old_room_id,
+        editRecord.new_room_id,
+        editRecord.old_urgency,
+        editRecord.new_urgency,
+        editRecord.reason
+      ).run();
+
+      await recordStatusHistory(env, requestId, existingRequest.status, existingRequest.status, currentUser.id, `Diedit administrator: ${input.reason.trim()}`);
+
+      return json({ success: true, message: "Laporan berhasil diperbarui oleh administrator." });
+    }
+
+    // ========== FR-039: Admin Merge Laporan Duplikat ==========
+    const adminMergeMatch = url.pathname.match(/^\/api\/admin\/requests\/([a-zA-Z0-9-]+)\/merge$/);
+    if (adminMergeMatch && request.method === "POST") {
+      if (currentUser.role !== "ADMIN") {
+        return json({ error: "Hanya administrator yang dapat menggabungkan laporan." }, 403);
+      }
+
+      const duplicateId = adminMergeMatch[1];
+      const input = await request.json() as { main_request_id?: string };
+
+      if (!input.main_request_id) {
+        return json({ error: "ID laporan utama (main_request_id) wajib diisi." }, 422);
+      }
+
+      const mainId = input.main_request_id;
+      if (duplicateId === mainId) {
+        return json({ error: "Laporan tidak dapat digabungkan dengan dirinya sendiri." }, 422);
+      }
+
+      // Ambil kedua laporan
+      const duplicateRequest = await env.DB.prepare(`
+        SELECT id, request_number, status FROM service_requests WHERE id = ?
+      `).bind(duplicateId).first<{ id: string; request_number: string; status: string }>();
+
+      const mainRequest = await env.DB.prepare(`
+        SELECT id, request_number, status FROM service_requests WHERE id = ?
+      `).bind(mainId).first<{ id: string; request_number: string; status: string }>();
+
+      if (!duplicateRequest || !mainRequest) {
+        return json({ error: "Laporan utama atau laporan duplikat tidak ditemukan." }, 404);
+      }
+
+      const closedStatuses = ["CLOSED_AUTO", "CLOSED_ADMIN", "CLOSED_REPORTER_CONFIRMED", "CANCELLED", "MERGED"];
+      if (closedStatuses.includes(duplicateRequest.status) || closedStatuses.includes(mainRequest.status)) {
+        return json({ error: "Laporan yang sudah ditutup, dibatalkan, atau digabungkan tidak dapat digabungkan kembali." }, 422);
+      }
+
+      // Gabungkan laporan duplikat: ubah status ke MERGED dan set duplicate_of_id
+      await env.DB.prepare(`
+        UPDATE service_requests
+        SET status = 'MERGED', duplicate_of_id = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).bind(mainId, duplicateId).run();
+
+      // Tambahkan riwayat status untuk laporan duplikat
+      await recordStatusHistory(
+        env,
+        duplicateId,
+        duplicateRequest.status,
+        "MERGED",
+        currentUser.id,
+        `Digabungkan ke laporan utama #${mainRequest.request_number}`
+      );
+
+      // Tambahkan komentar di laporan duplikat
+      const commentId1 = `cmt-${crypto.randomUUID()}`;
+      await env.DB.prepare(`
+        INSERT INTO request_comments (id, request_id, user_id, content)
+        VALUES (?, ?, ?, ?)
+      `).bind(
+        commentId1,
+        duplicateId,
+        currentUser.id,
+        `[SISTEM] Laporan ini telah ditandai sebagai duplikat dan digabungkan ke laporan utama #${mainRequest.request_number}.`
+      ).run();
+
+      // Tambahkan komentar di laporan utama
+      const commentId2 = `cmt-${crypto.randomUUID()}`;
+      await env.DB.prepare(`
+        INSERT INTO request_comments (id, request_id, user_id, content)
+        VALUES (?, ?, ?, ?)
+      `).bind(
+        commentId2,
+        mainId,
+        currentUser.id,
+        `[SISTEM] Laporan duplikat #${duplicateRequest.request_number} telah digabungkan ke laporan ini.`
+      ).run();
+
+      return json({ success: true, message: "Laporan duplikat berhasil digabungkan ke laporan utama." });
+    }
+
+    // ========== FR-040: Admin Reassign Teknisi ==========
+    const adminReassignMatch = url.pathname.match(/^\/api\/admin\/requests\/([a-zA-Z0-9-]+)\/reassign$/);
+    if (adminReassignMatch && request.method === "POST") {
+      if (currentUser.role !== "ADMIN") {
+        return json({ error: "Hanya administrator yang dapat mengganti teknisi." }, 403);
+      }
+
+      const requestId = adminReassignMatch[1];
+      const input = await request.json() as {
+        new_technician_id?: string;
+        reason?: string;
+      };
+
+      if (!input.new_technician_id || !input.reason || input.reason.trim().length < 5) {
+        return json({ error: "Teknisi baru dan alasan penggantian wajib diisi (minimal 5 karakter)." }, 422);
+      }
+
+      // Ambil data laporan
+      const req = await env.DB.prepare(`
+        SELECT id, status FROM service_requests WHERE id = ?
+      `).bind(requestId).first<{ id: string; status: string }>();
+
+      if (!req) {
+        return json({ error: "Laporan tidak ditemukan." }, 404);
+      }
+
+      // Pastikan ada teknisi utama yang sedang aktif
+      const activeAssignment = await env.DB.prepare(`
+        SELECT id, technician_id FROM request_assignments
+        WHERE request_id = ? AND status = 'ACTIVE' AND assignment_type = 'PRIMARY'
+      `).bind(requestId).first<{ id: string; technician_id: string }>();
+
+      if (!activeAssignment) {
+        return json({ error: "Belum ada teknisi utama aktif yang ditugaskan pada laporan ini." }, 422);
+      }
+
+      if (activeAssignment.technician_id === input.new_technician_id) {
+        return json({ error: "Teknisi baru tidak boleh sama dengan teknisi saat ini." }, 422);
+      }
+
+      // Pastikan teknisi baru adalah user berrole TECHNICIAN
+      const newTech = await env.DB.prepare(`
+        SELECT id, name FROM users WHERE id = ? AND role = 'TECHNICIAN' AND is_active = 1
+      `).bind(input.new_technician_id).first();
+
+      if (!newTech) {
+        return json({ error: "Teknisi baru tidak valid atau tidak aktif." }, 422);
+      }
+
+      // Cek apakah sudah ada pengajuan reassign yang sedang berjalan (PENDING)
+      const pendingAssignment = await env.DB.prepare(`
+        SELECT id FROM request_assignments
+        WHERE request_id = ? AND status = 'REPLACEMENT_PENDING'
+      `).bind(requestId).first();
+
+      if (pendingAssignment) {
+        return json({ error: "Sudah ada pengajuan penggantian teknisi yang sedang menunggu persetujuan." }, 422);
+      }
+
+      // Buat assignment baru dengan status REPLACEMENT_PENDING
+      const assignmentId = `asgn-${crypto.randomUUID()}`;
+      await env.DB.prepare(`
+        INSERT INTO request_assignments
+        (id, request_id, technician_id, assignment_type, status, assigned_by_user_id, reason)
+        VALUES (?, ?, ?, 'PRIMARY', 'REPLACEMENT_PENDING', ?, ?)
+      `).bind(
+        assignmentId,
+        requestId,
+        input.new_technician_id,
+        currentUser.id,
+        input.reason.trim()
+      ).run();
+
+      // Kirim notifikasi ke teknisi lama
+      await createNotification(
+        env,
+        activeAssignment.technician_id,
+        "STATUS_CHANGE",
+        "Pengajuan Penggantian Tugas",
+        `Administrator mengajukan penggantian Anda pada laporan ini. Butuh persetujuan Anda.`,
+        requestId
+      );
+
+      // Kirim notifikasi ke teknisi baru
+      await createNotification(
+        env,
+        input.new_technician_id,
+        "STATUS_CHANGE",
+        "Tawaran Tugas Baru (Penggantian)",
+        `Administrator menawarkan tugas baru sebagai pengganti teknisi lama pada laporan ini.`,
+        requestId
+      );
+
+      return json({ success: true, assignment_id: assignmentId, message: "Pengajuan penggantian teknisi berhasil dikirim." });
+    }
+
+    // ========== FR-024, FR-025, FR-026: Facility Manager Dashboard Stats ==========
+    if (url.pathname === "/api/reports/stats" && request.method === "GET") {
+      if (currentUser.role !== "FACILITY_MANAGER") {
+        return json({ error: "Hanya Manajer Fasilitas yang dapat mengakses data ini." }, 403);
+      }
+
+      const totalSolvedResult = await env.DB.prepare(`
+        SELECT COUNT(*) AS count FROM service_requests
+        WHERE status IN ('CLOSED_AUTO', 'CLOSED_ADMIN', 'CLOSED_REPORTER_CONFIRMED')
+      `).first<{ count: number }>();
+
+      const categoryChartResult = await env.DB.prepare(`
+        SELECT c.name AS category_name, COUNT(r.id) AS count
+        FROM service_requests r
+        JOIN categories c ON r.category_id = c.id
+        GROUP BY c.name
+      `).all<{ category_name: string; count: number }>();
+
+      return json({
+        success: true,
+        total_solved: totalSolvedResult?.count || 0,
+        category_chart: categoryChartResult.results
+      });
+    }
+
+    // ========== FR-028, FR-029, FR-042: Facility Manager Laporan Ringkas & CSV ==========
+    const fmSummaryMatch = url.pathname.match(/^\/api\/reports\/summary(\.csv)?$/);
+    if (fmSummaryMatch && request.method === "GET") {
+      if (currentUser.role !== "FACILITY_MANAGER") {
+        return json({ error: "Hanya Manajer Fasilitas yang dapat mengakses data ini." }, 403);
+      }
+
+      const isCsv = !!fmSummaryMatch[1];
+      const categoryId = url.searchParams.get("category_id");
+      const roomId = url.searchParams.get("room_id");
+      const startDate = url.searchParams.get("start_date");
+      const endDate = url.searchParams.get("end_date");
+      const sort = url.searchParams.get("sort") || "newest";
+
+      let query = `
+        SELECT r.id, r.request_number, r.title, r.status, c.name AS category,
+               ro.building || ' - ' || ro.floor || ' - ' || ro.room_name AS location,
+               r.created_at, r.closed_at,
+               (SELECT note FROM facility_manager_notes WHERE request_id = r.id ORDER BY created_at DESC LIMIT 1) AS follow_up_note
+        FROM service_requests r
+        JOIN categories c ON r.category_id = c.id
+        JOIN rooms ro ON r.room_id = ro.id
+        WHERE 1 = 1
+      `;
+
+      const params: string[] = [];
+
+      if (categoryId) {
+        query += ` AND r.category_id = ? `;
+        params.push(categoryId);
+      }
+
+      if (roomId) {
+        query += ` AND r.room_id = ? `;
+        params.push(roomId);
+      }
+
+      if (startDate) {
+        query += ` AND r.created_at >= ? `;
+        params.push(startDate);
+      }
+
+      if (endDate) {
+        query += ` AND r.created_at <= ? `;
+        params.push(endDate + " 23:59:59");
+      }
+
+      if (sort === "oldest") {
+        query += ` ORDER BY r.created_at ASC `;
+      } else {
+        query += ` ORDER BY r.created_at DESC `;
+      }
+
+      const statement = env.DB.prepare(query);
+      const result = await (params.length > 0 ? statement.bind(...params) : statement).all<{
+        id: string;
+        request_number: string;
+        title: string;
+        status: string;
+        category: string;
+        location: string;
+        created_at: string;
+        closed_at: string | null;
+        follow_up_note: string | null;
+      }>();
+
+      if (isCsv) {
+        let csvContent = "\uFEFFNo Laporan,Judul,Kategori,Lokasi,Status,Tanggal Dibuat,Tanggal Ditutup,Catatan Tindak Lanjut\n";
+        for (const row of result.results) {
+          const cleanTitle = row.title.replace(/"/g, '""');
+          const cleanNote = (row.follow_up_note || "").replace(/"/g, '""');
+          csvContent += `"${row.request_number}","${cleanTitle}","${row.category}","${row.location}","${row.status}","${row.created_at}","${row.closed_at || ''}","${cleanNote}"\n`;
+        }
+        return new Response(csvContent, {
+          headers: {
+            "Content-Type": "text/csv; charset=utf-8",
+            "Content-Disposition": `attachment; filename="Laporan_Ringkas_${Date.now()}.csv"`
+          }
+        });
+      }
+
+      return json({ success: true, data: result.results });
+    }
+
+    // ========== FR-043: Facility Manager Catatan Tindak Lanjut ==========
+    const fmFollowUpMatch = url.pathname.match(/^\/api\/reports\/([a-zA-Z0-9-]+)\/follow-up$/);
+    if (fmFollowUpMatch && request.method === "POST") {
+      if (currentUser.role !== "FACILITY_MANAGER") {
+        return json({ error: "Hanya Manajer Fasilitas yang dapat memberikan catatan tindak lanjut." }, 403);
+      }
+
+      const requestId = fmFollowUpMatch[1];
+      const input = await request.json() as { note?: string; reason?: string };
+
+      if (!input.note || input.note.trim().length < 1) {
+        return json({ error: "Catatan tindak lanjut wajib diisi." }, 422);
+      }
+
+      if (!input.reason || input.reason.trim().length < 5) {
+        return json({ error: "Alasan wajib diisi (minimal 5 karakter)." }, 422);
+      }
+
+      // Pastikan laporan ada
+      const reqExists = await env.DB.prepare(`
+        SELECT id FROM service_requests WHERE id = ?
+      `).bind(requestId).first();
+
+      if (!reqExists) {
+        return json({ error: "Laporan tidak ditemukan." }, 404);
+      }
+
+      const id = crypto.randomUUID();
+      await env.DB.prepare(`
+        INSERT INTO facility_manager_notes (id, request_id, manager_id, note, reason)
+        VALUES (?, ?, ?, ?, ?)
+      `).bind(
+        id,
+        requestId,
+        currentUser.id,
+        input.note.trim(),
+        input.reason.trim()
+      ).run();
+
+      return json({ success: true, message: "Catatan tindak lanjut berhasil disimpan." }, 201);
     }
 
     return json({ error: "Alamat API tidak ditemukan." }, 404);
