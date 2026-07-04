@@ -19,6 +19,10 @@ type ServiceRequest = {
   closed_at?: string;
   created_at?: string;
   updated_at?: string;
+  category_id?: string;
+  room_id?: string;
+  technician_name?: string;
+  pending_reassignment?: string;
 };
 
 type StatusHistoryItem = {
@@ -152,19 +156,12 @@ export default function App() {
   const [adminEditRoomId, setAdminEditRoomId] = useState("");
   const [adminEditDescription, setAdminEditDescription] = useState("");
   const [adminEditReason, setAdminEditReason] = useState("");
-  const [adminEditError, setAdminEditError] = useState("");
-  const [adminEditSuccess, setAdminEditSuccess] = useState("");
-
   const [showMergeModal, setShowMergeModal] = useState(false);
   const [mergeTargetRequestId, setMergeTargetRequestId] = useState("");
-  const [mergeError, setMergeError] = useState("");
-  const [mergeSuccess, setMergeSuccess] = useState("");
 
   const [showReassignModal, setShowReassignModal] = useState(false);
   const [reassignTechnicianId, setReassignTechnicianId] = useState("");
   const [reassignReason, setReassignReason] = useState("");
-  const [reassignError, setReassignError] = useState("");
-  const [reassignSuccess, setReassignSuccess] = useState("");
 
   const [techniciansList, setTechniciansList] = useState<any[]>([]);
   const [selectedTechId, setSelectedTechId] = useState("");
@@ -2321,7 +2318,7 @@ export default function App() {
                   {/* REASSIGNMENT APPROVAL WORKFLOW FOR TECHNICIAN */}
                   {selectedRequestDetail.pending_reassignment && (
                     (() => {
-                      const [asgnId, newTechId, newTechName, reassignReason, oldApprovedAt, newApprovedAt] = selectedRequestDetail.pending_reassignment.split(":");
+                      const [, newTechId, newTechName, reassignReason, oldApprovedAt, newApprovedAt] = selectedRequestDetail.pending_reassignment.split(":");
                       const isOldTech = user.id !== newTechId;
                       const isNewTech = user.id === newTechId;
 
