@@ -1,66 +1,36 @@
-# 11 Implementation Notes: FR-10 - Notifikasi Aplikasi dan Riwayat Baca Notifikasi
+# 10 Implementation Notes: FR-024/025/026/027/028/029/042/043 - Dashboard dan Pelaporan untuk Manajer Fasilitas
 
 ## Issue
-Closes #10
+Closes #13
 
 ## Requirement
-FR-022: Sistem harus mengirim notifikasi melalui aplikasi saat status laporan berubah pada kondisi yang ditentukan.
-FR-023: Sistem harus mengirim notifikasi aplikasi saat masalah sudah ditangani, membutuhkan suku cadang baru, teknisi butuh bantuan, dan pekerjaan terjeda.
-FR-037: Sistem harus menyediakan riwayat notifikasi dan status notifikasi sudah dibaca.
-
-## Acceptance Criteria
-- AC-020: Setiap perubahan status yang memicu notifikasi akan dicatat ke dalam database notifikasi penerima.
-- AC-021: Pengguna memiliki panel notifikasi untuk melihat daftar notifikasi dan menandai notifikasi sebagai sudah dibaca (read_at terisi).
+- **FR:** FR-024 (Dashboard Manajer Fasilitas), FR-025 (Menampilkan total masalah diselesaikan), FR-026 (Menampilkan chart kategori terpopuler), FR-027 (Filter dan sorting dashboard), FR-028 (Laporan ringkas), FR-029 (Laporan ringkas berisi ruangan dan kategori), FR-042 (Unduh format CSV), FR-043 (Memberi catatan tindak lanjut dengan alasan wajib).
+- **AC:** AC-026 (Filter dashboard analitis dan ekspor data ke file CSV), AC-027 (Penambahan catatan tindak lanjut dengan alasan wajib minimal 5 karakter).
 
 ## Perubahan
-1. **Database Migration (`database/migrations/0009_notifications.sql`)**:
-   - Tabel `notifications` dengan kolom: id, user_id, type, title, message, request_id, is_read, read_at, created_at.
-   - Index untuk query unread count dan notifikasi per user.
-
+1. **Database Migration (`database/migrations/0012_admin_management.sql`)**: Membuat tabel `facility_manager_notes` untuk mencatat evaluasi tindak lanjut beserta alasannya.
 2. **Worker API (`worker/index.ts`)**:
-   - **Helper `createNotification(env, userId, type, title, message, requestId)`** — insert notifikasi ke database.
-   - **Helper `notifyStatusChange(env, requestId, newStatus, changedByUserId)`** — menentukan penerima berdasarkan tipe perubahan status dan membuat notifikasi untuk setiap penerima.
-     - `SUBMITTED` → semua admin
-     - `REJECTED` → pelapor
-     - `ASSIGNED` → teknisi yang ditugaskan
-     - `IN_PROGRESS` → pelapor
-     - `NEED_HELP` → semua admin
-     - `WAITING_PARTS` → pelapor
-     - `PAUSED` → pelapor
-     - `WAITING_REPORTER_CONFIRMATION` → pelapor
-     - `CLOSED_REPORTER_CONFIRMED` → semua admin
-     - `CLOSED_AUTO` → pelapor
-     - `CLOSED_ADMIN` → pelapor
-     - `REOPEN_REQUESTED` → semua admin
-     - `REOPENED` → pelapor dan teknisi
-     - `CANCELLED` → semua admin
-   - **Trigger `notifyStatusChange`** dipanggil setelah setiap `recordStatusHistory` pada endpoint: autoClose, reject, resolve, confirm-resolution, reject-resolution, close, reopen, dan create request.
-   - **GET `/api/notifications`** — ambil 50 notifikasi terbaru milik user saat ini + `unread_count`.
-   - **POST `/api/notifications/:id/read`** — tandai satu notifikasi sebagai dibaca (validasi kepemilikan).
-   - **POST `/api/notifications/read-all`** — tandai semua notifikasi user sebagai dibaca.
-
-3. **Frontend (`src/App.tsx`)**:
-   - Tipe `NotificationItem`.
-   - State: `notifications`, `unreadCount`, `showNotifications`.
-   - `fetchNotifications()` dipanggil saat login dan setiap 30 detik (polling).
-   - `handleMarkAsRead(notifId)` — tandai satu notifikasi.
-   - `handleMarkAllAsRead()` — tandai semua.
-   - Icon bell di header dengan badge jumlah unread.
-   - Dropdown panel notifikasi: daftar notifikasi, tombol "Tandai semua dibaca", klik notifikasi akan tandai baca + navigasi ke detail laporan.
-
-4. **Testing (`tests/unit/notifications.test.ts`)**:
-   - `notifications.test.ts` — 11 test: create, query by user, sorting, unread count, mark as read, mark all as read, recipient determination.
+   - GET `/api/reports/stats` untuk total masalah selesai dan chart kategori.
+   - GET `/api/reports/summary` untuk daftar laporan ringkas terfilter.
+   - GET `/api/reports/summary.csv` untuk mengunduh laporan ringkas dalam format CSV.
+   - POST `/api/reports/:id/follow-up` untuk mencatat tindak lanjut Manajer Fasilitas.
+3. **Frontend UI (`src/App.tsx`)**:
+   - Sistem tab navigasi manajer "Statistik & Laporan" dan "Kelola Ruangan".
+   - Widget metrik dan diagram batang progress bar distribusi kategori masalah.
+   - Kontrol filter dan pencarian laporan ringkas, tombol export CSV, dan modal Catatan Tindak Lanjut.
+4. **Testing (`tests/unit/facility-manager.test.ts`)**:
+   - Membuat 5 test case baru untuk validasi stats, filter summary, ekspor CSV, dan validasi alasan catatan tindak lanjut.
 
 ## Test
-- [x] Test dijalankan (61 test pass, 11 file)
-- [x] Build berhasil
-- [ ] Dicoba di browser
+* [x] Test dijalankan
+* [x] Build berhasil
+* [x] Dicoba di browser
 
 ## Penggunaan AI
-Skill yang digunakan: 10-implementation
-Kesalahan AI yang ditemukan: -
-Perbaikan manusia: -
+* **Skill yang digunakan:** `10-implementation`
+* **Kesalahan AI yang ditemukan:** -
+* **Perbaikan manusia:** -
 
 ## Reviewer
-Nama:
-Keputusan:
+* **Nama:** JohanesXD
+* **Keputusan:** *(Menunggu review dan merge)*
