@@ -388,6 +388,52 @@ export default {
       }
     }
 
+    // Endpoint GET & POST /api/requests/:id/comments
+    const commentsMatch = url.pathname.match(/^\/api\/requests\/([a-zA-Z0-9-]+)\/comments$/);
+    if (commentsMatch) {
+      const requestId = commentsMatch[1];
+
+      // Pastikan laporan ada
+      const checkRequest = await env.DB.prepare(`
+        SELECT id, reporter_id FROM service_requests WHERE id = ?
+      `).bind(requestId).first<{ id: string; reporter_id: string }>();
+
+      if (!checkRequest) {
+        return json({ error: "Laporan tidak ditemukan." }, 404);
+      }
+
+      // GET /api/requests/:id/comments
+      if (request.method === "GET") {
+        const result = await env.DB.prepare(`
+          SELECT rc.id, rc.content, rc.created_at, u.name AS author_name, u.role AS author_role
+          FROM request_comments rc
+          JOIN users u ON rc.user_id = u.id
+          WHERE rc.request_id = ?
+          ORDER BY rc.created_at ASC
+        `).bind(requestId).all();
+
+        return json({ data: result.results });
+      }
+
+      // POST /api/requests/:id/comments
+      if (request.method === "POST") {
+        const input = await request.json() as { content?: string };
+
+        if (!input.content || input.content.trim().length < 5) {
+          return json({ error: "Komentar wajib diisi (minimal 5 karakter)." }, 422);
+        }
+
+        const commentId = `cmt-${crypto.randomUUID()}`;
+
+        await env.DB.prepare(`
+          INSERT INTO request_comments (id, request_id, user_id, content)
+          VALUES (?, ?, ?, ?)
+        `).bind(commentId, requestId, currentUser.id, input.content.trim()).run();
+
+        return json({ success: true, id: commentId }, 201);
+      }
+    }
+
     return json({ error: "Alamat API tidak ditemukan." }, 404);
   }
 } satisfies ExportedHandler<Env>;

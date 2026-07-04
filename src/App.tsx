@@ -76,6 +76,12 @@ export default function App() {
   const [progressError, setProgressError] = useState("");
   const [progressSuccess, setProgressSuccess] = useState("");
 
+  // Comment Thread States
+  const [comments, setComments] = useState<{ id: string; content: string; created_at: string; author_name: string; author_role: string }[]>([]);
+  const [commentInput, setCommentInput] = useState("");
+  const [commentError, setCommentError] = useState("");
+  const [commentSuccess, setCommentSuccess] = useState("");
+
   // Load session from localStorage on mount
   useEffect(() => {
     const savedSession = localStorage.getItem("campus_session");
@@ -103,12 +109,17 @@ export default function App() {
     }
   }, [user]);
 
-  // Load progress logs when request is selected
+  // Load progress logs and comments when request is selected
   useEffect(() => {
     if (selectedRequest) {
       loadProgressLogs(selectedRequest.id);
+      loadComments(selectedRequest.id);
     } else {
       setProgressLogs([]);
+      setComments([]);
+      setCommentInput("");
+      setCommentError("");
+      setCommentSuccess("");
     }
   }, [selectedRequest]);
 
@@ -270,6 +281,57 @@ export default function App() {
       setProgressLogs(result.data ?? []);
     } catch (e) {
       console.error("Gagal memuat log progress", e);
+    }
+  }
+
+  async function loadComments(requestId: string) {
+    if (!user) return;
+    try {
+      const response = await fetch(`/api/requests/${requestId}/comments`, {
+        headers: {
+          "X-User-Email": user.campus_email,
+          "X-User-Role": user.role
+        }
+      });
+      const result = await response.json();
+      setComments(result.data ?? []);
+    } catch (e) {
+      console.error("Gagal memuat komentar", e);
+    }
+  }
+
+  async function handleAddComment(requestId: string) {
+    setCommentError("");
+    setCommentSuccess("");
+
+    if (!commentInput.trim() || commentInput.trim().length < 5) {
+      setCommentError("Komentar wajib diisi (minimal 5 karakter).");
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/requests/${requestId}/comments`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-User-Email": user?.campus_email ?? "",
+          "X-User-Role": user?.role ?? ""
+        },
+        body: JSON.stringify({ content: commentInput.trim() })
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        setCommentError(result.error ?? "Gagal mengirim komentar.");
+        return;
+      }
+
+      setCommentSuccess("Komentar berhasil dikirim.");
+      setCommentInput("");
+      await loadComments(requestId);
+    } catch (e) {
+      setCommentError("Koneksi bermasalah. Gagal mengirim komentar.");
     }
   }
 
@@ -722,6 +784,49 @@ export default function App() {
                           </div>
                           <p style={{ margin: "4px 0 0", fontSize: 13, color: "var(--text)" }}>{log.notes}</p>
                           <span style={{ fontSize: 11, color: "var(--text)", opacity: 0.8 }}>Oleh: {log.technician_name}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ borderTop: "1px solid var(--border)", paddingTop: 20, marginTop: 20 }}>
+                  <h4 style={{ margin: "0 0 16px", color: "var(--text-h)" }}>Komentar & Catatan Tambahan</h4>
+
+                  {commentSuccess && <div className="alert-success" style={{ fontSize: 13, padding: 8, marginBottom: 12 }}>{commentSuccess}</div>}
+                  {commentError && <div className="alert-error" style={{ fontSize: 13, padding: 8, marginBottom: 12 }}>{commentError}</div>}
+
+                  <div className="form-group" style={{ marginBottom: 12 }}>
+                    <textarea
+                      placeholder="Tulis komentar atau informasi tambahan (min 5 karakter)..."
+                      value={commentInput}
+                      onChange={(e) => setCommentInput(e.target.value)}
+                      rows={2}
+                      className="form-textarea"
+                      style={{ fontSize: 14 }}
+                    />
+                  </div>
+
+                  <button
+                    onClick={() => handleAddComment(selectedRequest.id)}
+                    className="btn-primary"
+                    style={{ fontSize: 13, width: "100%", marginBottom: 20 }}
+                  >
+                    Kirim Komentar
+                  </button>
+
+                  {comments.length === 0 ? (
+                    <p style={{ fontSize: 13, color: "var(--text)" }}>Belum ada komentar.</p>
+                  ) : (
+                    <div className="progress-timeline">
+                      {comments.map(c => (
+                        <div key={c.id} className="progress-timeline-item">
+                          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                            <span style={{ fontWeight: 600, color: "var(--text-h)" }}>{c.author_name}</span>
+                            <span style={{ color: "var(--text)" }}>{new Date(c.created_at).toLocaleString("id-ID")}</span>
+                          </div>
+                          <span style={{ fontSize: 10, color: "var(--primary)", textTransform: "uppercase", letterSpacing: 0.5 }}>{c.author_role}</span>
+                          <p style={{ margin: "4px 0 0", fontSize: 13, color: "var(--text-h)", whiteSpace: "pre-line" }}>{c.content}</p>
                         </div>
                       ))}
                     </div>
