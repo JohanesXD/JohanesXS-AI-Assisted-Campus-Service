@@ -15,6 +15,21 @@ function isValidCampusEmail(email: string): boolean {
   return email.endsWith(".ac.id") || email.endsWith("campus.ac.id");
 }
 
+async function recordStatusHistory(
+  env: Env,
+  requestId: string,
+  fromStatus: string | null,
+  toStatus: string,
+  changedByUserId: string | null,
+  reason: string | null
+): Promise<void> {
+  const id = crypto.randomUUID();
+  await env.DB.prepare(`
+    INSERT INTO request_status_history (id, request_id, from_status, to_status, changed_by_user_id, reason)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).bind(id, requestId, fromStatus, toStatus, changedByUserId, reason).run();
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -148,7 +163,61 @@ export default {
         WHERE id = ?
       `).bind(input.reason.trim(), requestId).run();
 
+      await recordStatusHistory(env, requestId, checkRequest.status, "REJECTED", currentUser.id, input.reason.trim());
+
       return json({ success: true, status: "REJECTED" }, 200);
+    }
+
+    // GET /api/requests/:id - detail laporan
+    const requestDetailMatch = url.pathname.match(/^\/api\/requests\/([a-zA-Z0-9-]+)$/);
+    if (requestDetailMatch && request.method === "GET") {
+      const requestId = requestDetailMatch[1];
+
+      const requestData = await env.DB.prepare(`
+        SELECT sr.id, sr.request_number, sr.title, sr.description, sr.status, sr.urgency,
+               sr.rejection_reason, sr.created_at, sr.updated_at,
+               c.name AS category,
+               u.name AS reporter_name, u.campus_email AS reporter_email,
+               r.building || ' - ' || r.floor || ' - ' || r.room_name AS location
+        FROM service_requests sr
+        JOIN categories c ON sr.category_id = c.id
+        JOIN rooms r ON sr.room_id = r.id
+        JOIN users u ON sr.reporter_id = u.id
+        WHERE sr.id = ?
+      `).bind(requestId).first();
+
+      if (!requestData) {
+        return json({ error: "Laporan tidak ditemukan." }, 404);
+      }
+
+      if (currentUser.role === "REPORTER") {
+        const ownerEmail = await env.DB.prepare(`
+          SELECT campus_email FROM users WHERE id = (SELECT reporter_id FROM service_requests WHERE id = ?)
+        `).bind(requestId).first<string>("campus_email");
+
+        if (ownerEmail && ownerEmail !== currentUser.campus_email) {
+          return json({ error: "Anda hanya dapat melihat laporan milik sendiri." }, 403);
+        }
+      }
+
+      return json({ data: requestData }, 200);
+    }
+
+    // GET /api/requests/:id/status-history
+    const statusHistoryMatch = url.pathname.match(/^\/api\/requests\/([a-zA-Z0-9-]+)\/status-history$/);
+    if (statusHistoryMatch && request.method === "GET") {
+      const requestId = statusHistoryMatch[1];
+
+      const result = await env.DB.prepare(`
+        SELECT rsh.id, rsh.from_status, rsh.to_status, rsh.reason, rsh.created_at,
+               u.name AS changed_by_name, u.role AS changed_by_role
+        FROM request_status_history rsh
+        LEFT JOIN users u ON rsh.changed_by_user_id = u.id
+        WHERE rsh.request_id = ?
+        ORDER BY rsh.created_at ASC
+      `).bind(requestId).all();
+
+      return json({ data: result.results }, 200);
     }
 
     // Endpoint POST /api/requests/:id/assign-additional
@@ -326,6 +395,8 @@ export default {
           input.room_id,
           input.urgency
         ).run();
+
+        await recordStatusHistory(env, id, null, "SUBMITTED", currentUser.id, null);
 
         return json({
           id,
