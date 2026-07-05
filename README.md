@@ -1,6 +1,6 @@
 # Campus Service Request and Maintenance System
 
-Aplikasi web berbasis Cloudflare Workers dan D1 Database yang digunakan untuk memantau, mengelola, dan menyelesaikan pelaporan masalah fasilitas di lingkungan kampus. Proyek ini dibangun sebagai bagian dari mata kuliah **Software Engineering** dengan bantuan AI (dari proses Requirements Engineering hingga Deployment).
+Aplikasi web berbasis Cloudflare Workers dan D1 Database yang digunakan untuk memantau, mengelola, dan menyelesaikan pelaporan masalah fasilitas di lingkungan kampus. Proyek ini dibangun sebagai bagian dari mata kuliah **Software Engineering** dengan bantuan AI (dari proses Requirements Engineering hingga Deployment). Projek ini memiliki 4 tipe akun yang bisa digunakan yakni: Pelapor, Admin, Teknisi dan Manajer fasilitas. Pelapor bisa berupa student atau dosen, Admin adalah staf yang berwenang dalam pengelolaan laporan masalah, Teknisi adalah teknisi yang terdaftar di sistem dengan perannya masing-masing, Manajer fasilitas adalah manajer yang melihat dashboard dari aplikasi web ini.
 
 ---
 
@@ -10,11 +10,15 @@ Aplikasi web berbasis Cloudflare Workers dan D1 Database yang digunakan untuk me
 * **NIM**: 105022310008
 * **Kelas**: Software Engineer
 * **Repository URL**: https://github.com/JohanesXD/JohanesXS-AI-Assisted-Campus-Service.git
-* **Cloudflare URL**: [Isi di sini]
-* **Commit terakhir**: [Isi di sini]
-* **Jumlah test**: 107
+* **Cloudflare URL**: https://ai-assisted-campus-service.jo-hongjoyo.workers.dev/
+* **Commit terakhir**: ea116ee - ui: change active tab background to var(--accent) to prevent white-on-white text in dark mode
+* **Jumlah test**: 113
 * **AI yang digunakan**: Codex, Antigravity, Devin, Cursor, OpenCode, Kimi
-* **Known limitations**: [Isi di sini]
+* **Known limitations**: * **Autentikasi Sederhana**: Autentikasi saat ini didasarkan pada pencocokan email dan peran yang disimpan di database (tanpa enkripsi kata sandi yang kompleks atau integrasi sistem Single Sign-On (SSO) resmi Kampus seperti OAuth/SAML).
+* **Tidak Ada Unggah Foto/Media**: Sistem saat ini hanya mendukung laporan dan komentar dalam bentuk teks. Belum ada fitur untuk mengunggah foto kerusakan fasilitas (misalnya integrasi dengan penyimpanan Cloudflare R2) untuk memverifikasi kerusakan secara visual.
+* **Batas Waktu Konfirmasi Hardcoded**: Batas waktu konfirmasi otomatis setelah laporan diselesaikan oleh teknisi diset keras (hardcoded) selama 45 menit. Di sistem nyata, durasi ini idealnya dapat diatur secara dinamis oleh administrator.
+* **Validasi Lokasi Fisik**: Penentuan lokasi masih bergantung pada kejujuran pelapor yang memilih dropdown ruangan secara manual. Belum ada validasi berbasis GPS atau pemindaian QR-Code ruangan untuk memastikan posisi fisik pelapor.
+* **Teknisi Hanya Bisa Ditambah lewat sistem**: Teknisi hanya dapat bertambah lewat sistem, jadi jika ada teknisi yang tidak memiliki akun kampus teknisi maka tidak dapat di tambahkan atau di daftarkan.
 
 ---
 
@@ -42,4 +46,4 @@ Aplikasi web berbasis Cloudflare Workers dan D1 Database yang digunakan untuk me
 > **Jawaban**: Traceability membantu saya dalam melanjutkan projek di ai lain, karena dengan adanya traceability ai dapat memahami sudah sampai dimana projek kita
 
 ### 8. Apa yang akan diperbaiki jika proyek diulang?
-> **Jawaban**: [Isi di sini]
+> **Jawaban**: Requirement dan Desain
