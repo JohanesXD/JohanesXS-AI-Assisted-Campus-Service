@@ -15,6 +15,11 @@ function isValidCampusEmail(email: string): boolean {
   return email.endsWith(".ac.id") || email.endsWith("campus.ac.id");
 }
 
+function isStudentEmail(email: string): boolean {
+  const lower = email.toLowerCase();
+  return lower.includes("student") || lower.includes("mhs");
+}
+
 async function recordStatusHistory(
   env: Env,
   requestId: string,
@@ -408,8 +413,12 @@ export default {
           SELECT campus_email FROM users WHERE id = (SELECT reporter_id FROM service_requests WHERE id = ?)
         `).bind(requestId).first<string>("campus_email");
 
-        if (ownerEmail && ownerEmail !== currentUser.campus_email) {
-          return json({ error: "Anda hanya dapat melihat laporan milik sendiri." }, 403);
+        if (ownerEmail) {
+          const isUserStudent = isStudentEmail(currentUser.campus_email);
+          const isOwnerStudent = isStudentEmail(ownerEmail);
+          if (isUserStudent !== isOwnerStudent) {
+            return json({ error: "Anda tidak memiliki izin untuk melihat laporan ini." }, 403);
+          }
         }
       }
 
@@ -1289,10 +1298,14 @@ export default {
         `;
         let params: string[] = [];
 
-        // Jika Reporter, filter hanya laporan miliknya sendiri
+        // Jika Reporter, filter berdasarkan jenis pelapor (Student/Dosen)
         if (currentUser.role === "REPORTER") {
-          query += " WHERE sr.reporter_id = ?";
-          params.push(currentUser.id);
+          const isUserStudent = isStudentEmail(currentUser.campus_email);
+          if (isUserStudent) {
+            query += " WHERE sr.reporter_id IN (SELECT id FROM users WHERE campus_email LIKE '%student%' OR campus_email LIKE '%mhs%')";
+          } else {
+            query += " WHERE sr.reporter_id IN (SELECT id FROM users WHERE campus_email NOT LIKE '%student%' AND campus_email NOT LIKE '%mhs%')";
+          }
         }
 
         // Jika Teknisi, filter hanya tugas aktif atau pengajuan penggantian yang melibatkan dirinya
@@ -1398,6 +1411,20 @@ export default {
 
       if (!checkRequest) {
         return json({ error: "Laporan tidak ditemukan." }, 404);
+      }
+
+      if (currentUser.role === "REPORTER") {
+        const ownerEmail = await env.DB.prepare(`
+          SELECT campus_email FROM users WHERE id = ?
+        `).bind(checkRequest.reporter_id).first<string>("campus_email");
+
+        if (ownerEmail) {
+          const isUserStudent = isStudentEmail(currentUser.campus_email);
+          const isOwnerStudent = isStudentEmail(ownerEmail);
+          if (isUserStudent !== isOwnerStudent) {
+            return json({ error: "Anda tidak memiliki izin untuk mengakses komentar laporan ini." }, 403);
+          }
+        }
       }
 
       // GET /api/requests/:id/comments
