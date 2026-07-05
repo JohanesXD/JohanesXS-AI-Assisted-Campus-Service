@@ -16,7 +16,7 @@ function validateTechnicianProgress(input: ProgressInput): { valid: boolean; err
     return { valid: false, error: "Kolom status dan catatan progress wajib diisi." };
   }
 
-  if (!["ASSIGNED", "IN_PROGRESS", "ON_HOLD", "RESOLVED"].includes(input.status)) {
+  if (!["ASSIGNED", "IN_PROGRESS", "NEED_HELP", "WAITING_PARTS", "ON_HOLD", "RESOLVED"].includes(input.status)) {
     return { valid: false, error: "Status progress tidak valid." };
   }
 
@@ -29,12 +29,24 @@ function validateTechnicianProgress(input: ProgressInput): { valid: boolean; err
 
 describe("Validasi Penerimaan & Pembaruan Progress Laporan oleh Teknisi (FR-012, FR-013)", () => {
   it("harus menyetujui progress yang lengkap dengan status dan catatan valid", () => {
-    const input: ProgressInput = {
+    const input1: ProgressInput = {
       role: "TECHNICIAN",
       status: "IN_PROGRESS",
       notes: "Suku cadang sudah dipesan dan akan dipasang besok."
     };
-    expect(validateTechnicianProgress(input)).toEqual({ valid: true });
+    const input2: ProgressInput = {
+      role: "TECHNICIAN",
+      status: "NEED_HELP",
+      notes: "Kerusakan memerlukan keahlian teknisi listrik spesialis."
+    };
+    const input3: ProgressInput = {
+      role: "TECHNICIAN",
+      status: "WAITING_PARTS",
+      notes: "Menunggu pengiriman IC regulator dari vendor."
+    };
+    expect(validateTechnicianProgress(input1)).toEqual({ valid: true });
+    expect(validateTechnicianProgress(input2)).toEqual({ valid: true });
+    expect(validateTechnicianProgress(input3)).toEqual({ valid: true });
   });
 
   it("harus menolak jika catatan progress kurang dari 5 karakter", () => {

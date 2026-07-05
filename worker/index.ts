@@ -771,6 +771,100 @@ export default {
       return json({ success: true, status: "IN_PROGRESS" }, 200);
     }
 
+    // Endpoint POST /api/requests/:id/progress - Teknisi memperbarui progress pekerjaan (FR-012, FR-013)
+    const progressMatch = url.pathname.match(/^\/api\/requests\/([a-zA-Z0-9-]+)\/progress$/);
+    if (progressMatch && request.method === "POST") {
+      if (currentUser.role !== "TECHNICIAN") {
+        return json({ error: "Hanya teknisi (TECHNICIAN) yang dapat memperbarui progress." }, 403);
+      }
+
+      const requestId = progressMatch[1];
+      const input = await request.json() as { status?: string; notes?: string };
+
+      if (!input.status || !input.notes) {
+        return json({ error: "Kolom status dan catatan progress wajib diisi." }, 422);
+      }
+
+      const allowedStatuses = ["IN_PROGRESS", "NEED_HELP", "WAITING_PARTS", "ON_HOLD", "RESOLVED"];
+      if (!allowedStatuses.includes(input.status)) {
+        return json({ error: "Status progress tidak valid." }, 422);
+      }
+
+      if (input.notes.trim().length < 5) {
+        return json({ error: "Catatan progress wajib diisi (minimal 5 karakter)." }, 422);
+      }
+
+      // Pastikan laporan ada
+      const checkRequest = await env.DB.prepare(`
+        SELECT id, status FROM service_requests WHERE id = ?
+      `).bind(requestId).first<{ id: string; status: string }>();
+
+      if (!checkRequest) {
+        return json({ error: "Laporan tidak ditemukan." }, 404);
+      }
+
+      // Pastikan teknisi ditugaskan ke laporan ini
+      const isAssigned = await env.DB.prepare(`
+        SELECT id FROM request_assignments
+        WHERE request_id = ? AND technician_id = ? AND status = 'ACTIVE'
+      `).bind(requestId, currentUser.id).first();
+
+      if (!isAssigned) {
+        return json({ error: "Anda tidak ditugaskan untuk menangani laporan ini." }, 403);
+      }
+
+      // Tentukan status laporan baru
+      let nextRequestStatus = input.status;
+      if (input.status === "RESOLVED") {
+        nextRequestStatus = "WAITING_REPORTER_CONFIRMATION";
+      }
+
+      // Update status laporan
+      await env.DB.prepare(`
+        UPDATE service_requests
+        SET status = ?,
+            resolved_at = ?,
+            confirmation_due_at = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).bind(
+        nextRequestStatus,
+        input.status === "RESOLVED" ? new Date().toISOString() : null,
+        input.status === "RESOLVED" ? new Date(Date.now() + 45 * 60 * 1000).toISOString() : null,
+        requestId
+      ).run();
+
+      // Simpan catatan progress
+      const progressId = `prog-${crypto.randomUUID()}`;
+      await env.DB.prepare(`
+        INSERT INTO technician_progress (id, request_id, technician_id, status, notes, created_at)
+        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      `).bind(progressId, requestId, currentUser.id, input.status, input.notes.trim()).run();
+
+      // Catat riwayat status jika berubah
+      if (checkRequest.status !== nextRequestStatus) {
+        await recordStatusHistory(env, requestId, checkRequest.status, nextRequestStatus, currentUser.id, input.notes.trim());
+        await notifyStatusChange(env, requestId, nextRequestStatus, currentUser.id);
+      }
+
+      return json({ success: true, status: nextRequestStatus }, 200);
+    }
+
+    // Endpoint GET /api/requests/:id/progress - Riwayat progress teknisi (FR-012, FR-013)
+    const getProgressMatch = url.pathname.match(/^\/api\/requests\/([a-zA-Z0-9-]+)\/progress$/);
+    if (getProgressMatch && request.method === "GET") {
+      const requestId = getProgressMatch[1];
+      const result = await env.DB.prepare(`
+        SELECT tp.id, tp.status, tp.notes, tp.created_at, u.name AS technician_name
+        FROM technician_progress tp
+        JOIN users u ON tp.technician_id = u.id
+        WHERE tp.request_id = ?
+        ORDER BY tp.created_at DESC
+      `).bind(requestId).all();
+
+      return json({ data: result.results }, 200);
+    }
+
     // Endpoint POST /api/requests/:id/resolve - Teknisi menyelesaikan pekerjaan
     const resolveMatch = url.pathname.match(/^\/api\/requests\/([a-zA-Z0-9-]+)\/resolve$/);
     if (resolveMatch && request.method === "POST") {

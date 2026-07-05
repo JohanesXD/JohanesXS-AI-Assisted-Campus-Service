@@ -102,6 +102,9 @@ export default function App() {
   const [comments, setComments] = useState<CommentItem[]>([]);
   const [newComment, setNewComment] = useState("");
   const [detailMessage, setDetailMessage] = useState("");
+  const [progressStatusInput, setProgressStatusInput] = useState("IN_PROGRESS");
+  const [progressNotesInput, setProgressNotesInput] = useState("");
+  const [progressHistory, setProgressHistory] = useState<any[]>([]);
   const [rejectResolutionReason, setRejectResolutionReason] = useState("");
   const [closureMessage, setClosureMessage] = useState("");
   const [confirmLoading, setConfirmLoading] = useState(false);
@@ -841,11 +844,61 @@ export default function App() {
     }
   }
 
+  async function loadProgressHistory(requestId: string) {
+    if (!user) return;
+    try {
+      const response = await fetch(`/api/requests/${requestId}/progress`, {
+        headers: { "X-User-Email": user.campus_email, "X-User-Role": user.role }
+      });
+      if (!response.ok) return;
+      const result = await response.json();
+      setProgressHistory(result.data ?? []);
+    } catch (e) {
+      console.error("Gagal memuat riwayat progress", e);
+    }
+  }
+
+  async function handleSubmitProgress(requestId: string) {
+    if (!user) return;
+    if (!progressNotesInput.trim() || progressNotesInput.trim().length < 5) {
+      setDetailMessage("Catatan progress wajib diisi (minimal 5 karakter).");
+      return;
+    }
+    setDetailMessage("Memproses...");
+    try {
+      const response = await fetch(`/api/requests/${requestId}/progress`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-User-Email": user.campus_email,
+          "X-User-Role": user.role
+        },
+        body: JSON.stringify({ status: progressStatusInput, notes: progressNotesInput })
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        setDetailMessage(result.error ?? "Gagal memperbarui progress.");
+        return;
+      }
+      setDetailMessage("Progress berhasil diperbarui!");
+      setProgressNotesInput("");
+      await Promise.all([
+        loadRequestDetail(requestId),
+        loadRequests(),
+        loadStatusHistory(requestId),
+        loadProgressHistory(requestId)
+      ]);
+    } catch (e) {
+      setDetailMessage("Koneksi terputus.");
+    }
+  }
+
   async function handleSelectRequest(item: ServiceRequest) {
     setDetailMessage("");
     setSelectedRequestDetail(null);
     setStatusHistory([]);
     setComments([]);
+    setProgressHistory([]);
     setNewComment("");
     resetEditState();
     resetCancelState();
@@ -853,6 +906,7 @@ export default function App() {
       loadRequestDetail(item.id),
       loadStatusHistory(item.id),
       loadComments(item.id),
+      loadProgressHistory(item.id),
     ]);
   }
 
@@ -2467,6 +2521,64 @@ export default function App() {
                       </div>
                     )}
                   </div>
+
+                  {/* UPDATE PROGRESS SECTION FOR TECHNICIAN */}
+                  {!["CLOSED_AUTO", "CLOSED_ADMIN", "CLOSED_REPORTER_CONFIRMED", "CANCELLED", "MERGED", "WAITING_REPORTER_CONFIRMATION"].includes(selectedRequestDetail.status) && (
+                    <div style={{ borderTop: "1px solid var(--border)", paddingTop: 16, marginTop: 16 }}>
+                      <h4 style={{ margin: "0 0 12px", color: "var(--text-h)" }}>📢 Perbarui Progress</h4>
+                      <div className="form-group" style={{ marginBottom: 12 }}>
+                        <label style={{ fontSize: 12 }}>Status Progress Baru</label>
+                        <select
+                          value={progressStatusInput}
+                          onChange={(e) => setProgressStatusInput(e.target.value)}
+                          className="form-select"
+                          style={{ fontSize: 13, padding: "8px 12px" }}
+                        >
+                          <option value="IN_PROGRESS">Sedang Dikerjakan (IN_PROGRESS)</option>
+                          <option value="NEED_HELP">Meminta Bantuan (NEED_HELP)</option>
+                          <option value="WAITING_PARTS">Menunggu Suku Cadang (WAITING_PARTS)</option>
+                          <option value="ON_HOLD">Tertunda (ON_HOLD)</option>
+                          <option value="RESOLVED">Selesai / Resolusi (RESOLVED)</option>
+                        </select>
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 16 }}>
+                        <label style={{ fontSize: 12 }}>Catatan / Detail Progress (Min. 5 Karakter)</label>
+                        <textarea
+                          value={progressNotesInput}
+                          onChange={(e) => setProgressNotesInput(e.target.value)}
+                          placeholder="Contoh: Suku cadang motherboard masih dalam pengiriman..."
+                          rows={2}
+                          className="form-textarea"
+                          style={{ fontSize: 13, padding: "8px 12px" }}
+                        />
+                      </div>
+                      <button
+                        onClick={() => handleSubmitProgress(selectedRequestDetail.id)}
+                        className="btn-primary"
+                        style={{ width: "100%", fontSize: 13, padding: "10px" }}
+                      >
+                        Kirim Progress Update
+                      </button>
+                    </div>
+                  )}
+
+                  {/* PROGRESS HISTORY TIMELINE FOR TECHNICIAN */}
+                  {progressHistory.length > 0 && (
+                    <div style={{ borderTop: "1px solid var(--border)", paddingTop: 16, marginTop: 16 }}>
+                      <h4 style={{ margin: "0 0 12px", color: "var(--text-h)" }}>📋 Riwayat Progress Kerja</h4>
+                      <div style={{ maxHeight: 150, overflowY: "auto", background: "var(--bg)", padding: 10, borderRadius: 6 }}>
+                        {progressHistory.map(p => (
+                          <div key={p.id} style={{ borderBottom: "1px solid var(--border)", paddingBottom: 8, marginBottom: 8, fontSize: 13 }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", color: "var(--text)", fontSize: 11, marginBottom: 4 }}>
+                              <span style={{ fontWeight: 600, color: "var(--accent)" }}>{p.status}</span>
+                              <span>{p.created_at}</span>
+                            </div>
+                            <div style={{ color: "var(--text-h)" }}>{p.notes}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {/* COMMENTS IN TECHNICIAN DASHBOARD */}
                   <div style={{ borderTop: "1px solid var(--border)", paddingTop: 16, marginTop: 16 }}>
