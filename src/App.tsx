@@ -1991,14 +1991,14 @@ export default function App() {
             <button
               onClick={() => { setActiveTab("REVIEW"); setSelectedRequest(null); }}
               className={`btn-primary`}
-              style={{ width: "auto", paddingInline: 20, background: activeTab === "REVIEW" ? "var(--text-h)" : "var(--social-bg)", color: activeTab === "REVIEW" ? "#fff" : "var(--text)" }}
+              style={{ width: "auto", paddingInline: 20, background: activeTab === "REVIEW" ? "var(--accent)" : "var(--social-bg)", color: activeTab === "REVIEW" ? "#fff" : "var(--text-h)" }}
             >
               Antrean Review
             </button>
             <button
               onClick={() => { setActiveTab("ALL"); setSelectedRequest(null); }}
               className={`btn-primary`}
-              style={{ width: "auto", paddingInline: 20, background: activeTab === "ALL" ? "var(--text-h)" : "var(--social-bg)", color: activeTab === "ALL" ? "#fff" : "var(--text)" }}
+              style={{ width: "auto", paddingInline: 20, background: activeTab === "ALL" ? "var(--accent)" : "var(--social-bg)", color: activeTab === "ALL" ? "#fff" : "var(--text-h)" }}
             >
               Semua Laporan
             </button>
@@ -2642,14 +2642,14 @@ export default function App() {
               <button
                 onClick={() => setActiveTab("DASHBOARD")}
                 className={`btn-primary`}
-                style={{ width: "auto", paddingInline: 16, background: activeTab === "DASHBOARD" ? "var(--text-h)" : "var(--social-bg)", color: activeTab === "DASHBOARD" ? "#fff" : "var(--text)" }}
+                style={{ width: "auto", paddingInline: 16, background: activeTab === "DASHBOARD" ? "var(--accent)" : "var(--social-bg)", color: activeTab === "DASHBOARD" ? "#fff" : "var(--text-h)" }}
               >
                 Statistik & Laporan
               </button>
               <button
                 onClick={() => setActiveTab("ROOMS")}
                 className={`btn-primary`}
-                style={{ width: "auto", paddingInline: 16, background: activeTab === "ROOMS" ? "var(--text-h)" : "var(--social-bg)", color: activeTab === "ROOMS" ? "#fff" : "var(--text)" }}
+                style={{ width: "auto", paddingInline: 16, background: activeTab === "ROOMS" ? "var(--accent)" : "var(--social-bg)", color: activeTab === "ROOMS" ? "#fff" : "var(--text-h)" }}
               >
                 Kelola Ruangan
               </button>
