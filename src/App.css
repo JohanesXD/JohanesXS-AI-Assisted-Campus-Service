@@ -260,6 +260,9 @@
 
 .btn-primary:focus {
   outline: none;
+}
+
+.btn-primary:focus-visible {
   box-shadow: 0 0 0 3px var(--accent-border);
 }
 
@@ -297,6 +300,9 @@
 
 .btn-secondary:focus {
   outline: none;
+}
+
+.btn-secondary:focus-visible {
   box-shadow: 0 0 0 3px var(--accent-border);
 }
 
@@ -383,6 +389,9 @@
 
 .btn-logout:focus {
   outline: none;
+}
+
+.btn-logout:focus-visible {
   box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.2);
 }
 
