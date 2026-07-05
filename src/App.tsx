@@ -1087,6 +1087,52 @@ export default function App() {
     }
   }
 
+  async function handleStartWork(requestId: string) {
+    if (!user) return;
+    setDetailMessage("Memproses...");
+    try {
+      const response = await fetch(`/api/requests/${requestId}/start`, {
+        method: "POST",
+        headers: { "X-User-Email": user.campus_email, "X-User-Role": user.role }
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        setDetailMessage(result.error ?? "Gagal memulai pekerjaan.");
+        return;
+      }
+      setDetailMessage("Pekerjaan dimulai!");
+      await Promise.all([
+        loadRequestDetail(requestId),
+        loadRequests()
+      ]);
+    } catch (e) {
+      setDetailMessage("Koneksi terputus.");
+    }
+  }
+
+  async function handleResolveRequest(requestId: string) {
+    if (!user) return;
+    setDetailMessage("Memproses...");
+    try {
+      const response = await fetch(`/api/requests/${requestId}/resolve`, {
+        method: "POST",
+        headers: { "X-User-Email": user.campus_email, "X-User-Role": user.role }
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        setDetailMessage(result.error ?? "Gagal menyelesaikan pekerjaan.");
+        return;
+      }
+      setDetailMessage("Pekerjaan berhasil diselesaikan!");
+      await Promise.all([
+        loadRequestDetail(requestId),
+        loadRequests()
+      ]);
+    } catch (e) {
+      setDetailMessage("Koneksi terputus.");
+    }
+  }
+
   async function handleAdminClose(requestId: string) {
     if (!user) return;
     setAdminError("");
@@ -2391,6 +2437,35 @@ export default function App() {
                     <div style={{ color: "var(--text-h)", fontSize: 14, background: "var(--bg)", padding: 12, borderRadius: 6, border: "1px solid var(--border)", whiteSpace: "pre-line" }}>
                       {selectedRequestDetail.description}
                     </div>
+                  </div>
+
+                  {/* STATUS ACTION BUTTONS FOR TECHNICIAN */}
+                  <div style={{ marginTop: 24, marginBottom: 20 }}>
+                    {["ASSIGNED", "REOPENED"].includes(selectedRequestDetail.status) && (
+                      <button
+                        onClick={() => handleStartWork(selectedRequestDetail.id)}
+                        className="btn-primary"
+                        style={{ width: "100%", background: "#3b82f6" }}
+                      >
+                        ⚡ Mulai Pekerjaan
+                      </button>
+                    )}
+
+                    {selectedRequestDetail.status === "IN_PROGRESS" && (
+                      <button
+                        onClick={() => handleResolveRequest(selectedRequestDetail.id)}
+                        className="btn-primary"
+                        style={{ width: "100%", background: "#10b981" }}
+                      >
+                        ✅ Selesaikan Pekerjaan
+                      </button>
+                    )}
+
+                    {selectedRequestDetail.status === "WAITING_REPORTER_CONFIRMATION" && (
+                      <div style={{ padding: 12, background: "rgba(59, 130, 246, 0.08)", border: "1px solid rgba(59, 130, 246, 0.3)", borderRadius: 8, textAlign: "center", color: "#3b82f6", fontSize: 13, fontWeight: 500 }}>
+                        ⏳ Menunggu Konfirmasi Penyelesaian dari Pelapor
+                      </div>
+                    )}
                   </div>
 
                   {/* COMMENTS IN TECHNICIAN DASHBOARD */}

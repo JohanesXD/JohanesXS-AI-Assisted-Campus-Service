@@ -45,6 +45,25 @@ function validateResolve(input: { status: string }): { valid: boolean; error?: s
   return { valid: true };
 }
 
+function validateStart(input: { status: string }): { valid: boolean; error?: string } {
+  if (input.status !== "ASSIGNED" && input.status !== "REOPENED") {
+    return { valid: false, error: "Hanya laporan berstatus ASSIGNED atau REOPENED yang dapat dimulai." };
+  }
+  return { valid: true };
+}
+
+describe("Validasi Start (FR-012)", () => {
+  it("harus menyetujui start dari ASSIGNED atau REOPENED", () => {
+    expect(validateStart({ status: "ASSIGNED" })).toEqual({ valid: true });
+    expect(validateStart({ status: "REOPENED" })).toEqual({ valid: true });
+  });
+
+  it("harus menolak start dari status selain ASSIGNED atau REOPENED", () => {
+    expect(validateStart({ status: "SUBMITTED" }).valid).toBe(false);
+    expect(validateStart({ status: "IN_PROGRESS" }).valid).toBe(false);
+  });
+});
+
 describe("Validasi Resolve (FR-018)", () => {
   it("harus menyetujui resolve dari IN_PROGRESS", () => {
     expect(validateResolve({ status: "IN_PROGRESS" })).toEqual({ valid: true });
