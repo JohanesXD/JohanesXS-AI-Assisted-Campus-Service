@@ -738,6 +738,39 @@ export default {
       }, 201);
     }
 
+    // Endpoint POST /api/requests/:id/start - Teknisi memulai pekerjaan
+    const startMatch = url.pathname.match(/^\/api\/requests\/([a-zA-Z0-9-]+)\/start$/);
+    if (startMatch && request.method === "POST") {
+      if (currentUser.role !== "TECHNICIAN") {
+        return json({ error: "Hanya teknisi (TECHNICIAN) yang dapat memulai pekerjaan." }, 403);
+      }
+
+      const requestId = startMatch[1];
+      const checkRequest = await env.DB.prepare(`
+        SELECT id, status FROM service_requests WHERE id = ?
+      `).bind(requestId).first<{ id: string; status: string }>();
+
+      if (!checkRequest) {
+        return json({ error: "Laporan tidak ditemukan." }, 404);
+      }
+
+      if (checkRequest.status !== "ASSIGNED" && checkRequest.status !== "REOPENED") {
+        return json({ error: "Hanya laporan berstatus ASSIGNED atau REOPENED yang dapat dimulai." }, 422);
+      }
+
+      await env.DB.prepare(`
+        UPDATE service_requests
+        SET status = 'IN_PROGRESS',
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).bind(requestId).run();
+
+      await recordStatusHistory(env, requestId, checkRequest.status, "IN_PROGRESS", currentUser.id, null);
+      await notifyStatusChange(env, requestId, "IN_PROGRESS", currentUser.id);
+
+      return json({ success: true, status: "IN_PROGRESS" }, 200);
+    }
+
     // Endpoint POST /api/requests/:id/resolve - Teknisi menyelesaikan pekerjaan
     const resolveMatch = url.pathname.match(/^\/api\/requests\/([a-zA-Z0-9-]+)\/resolve$/);
     if (resolveMatch && request.method === "POST") {
